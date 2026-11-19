@@ -18,12 +18,26 @@ export const SKIN_TONES = [
   { name: 'Foncée', tex: 'dark', tint: '#cfb5a2', sw: '#6a432c' },
   { name: 'Très foncée', tex: 'dark', tint: '#a88d7c', sw: '#4b2f20' }
 ];
-export const EYE_COLORS = ['brown', 'brownlight', 'green', 'bluegreen', 'blue', 'lightblue', 'deepblue', 'grey', 'ice'];
+export const EYE_COLORS = [
+  { id: 'darkbrown', tex: 'brown', tint: '#6f625b', sw: '#3b2a20', name: 'Marron foncé' },
+  { id: 'brown', tex: 'brown', tint: '#b4a79f', sw: '#6a4630', name: 'Marron' },
+  { id: 'hazel', tex: 'brownlight', tint: '#c9bda9', sw: '#8a6a3c', name: 'Noisette' },
+  { id: 'green', tex: 'green', tint: '#bfc5b2', sw: '#5f7a4a', name: 'Vert' },
+  { id: 'greygreen', tex: 'bluegreen', tint: '#babfba', sw: '#6f8580', name: 'Gris-vert' },
+  { id: 'blue', tex: 'blue', tint: '#bcc3cc', sw: '#4f6f92', name: 'Bleu' },
+  { id: 'grey', tex: 'grey', tint: '#c4c4c4', sw: '#7c8288', name: 'Gris' }
+];
+export const BEARDS = [
+  { id: 'none', name: 'Rasé' }, { id: 'stubble', name: 'Barbe de 3 jours', mask: 'full', density: 0.42, mix: 0.6 },
+  { id: 'short', name: 'Barbe courte', mask: 'full', density: 0.78, mix: 0.78 }, { id: 'full', name: 'Barbe fournie', mask: 'full', density: 0.97, mix: 0.9 },
+  { id: 'moustache', name: 'Moustache', mask: 'moustache', density: 0.9, mix: 0.85 }, { id: 'goatee', name: 'Bouc', mask: 'goatee', density: 0.88, mix: 0.85 }
+];
+const eyeOf = (id) => EYE_COLORS.find((e) => e.id === id) || EYE_COLORS.find((e) => e.tex === id) || EYE_COLORS[1];
 
 export const DEFAULT_LOOK = {
   sex: 1, height: 180, weight: 78, muscle: 0.62,
-  d: { shoulders: 0.15, chest: 0.1, back: 0.1, arms: 0.1, forearms: 0, belly: 0, waist: 0, hips: 0, glutes: 0, thighs: 0, calves: 0, neck: 0, bust: 0, legs: 0 },
-  skin: 3, eyes: 'brown', brows: 'brow02', hair: 'h-short02', hairColor: '#24180f', beard: 0,
+  d: { shoulders: 0.15, chest: 0.1, back: 0.1, arms: 0.1, forearms: 0, belly: 0, waist: 0, hips: 0, glutes: 0, thighs: 0, calves: 0, neck: 0, bust: 0, legs: 0, nosew: 0, nosel: 0, nosehump: 0, nosetip: 0, mouthw: 0, lips: 0, jaw: 0, chin: 0, chinw: 0, cheeks: 0, facefat: 0, faceshape: 0 },
+  skin: 3, eyes: 'brown', brows: 'brow02', hair: 'h-short02', hairColor: '#24180f', beard: 'none',
   top: 'g-tee', topColor: '#c8ff2e', bottom: 'c-shorts', bottomColor: '#1b1d22',
   shoes: 's-shoes05', socks: true, watch: false
 };
@@ -144,7 +158,69 @@ function tex(core, path, srgb = true) {
   return core.tex[path];
 }
 
+const imgCache = {};
+const loadImg = (src) => (imgCache[src] = imgCache[src] || new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }));
+const beardCache = {};
+// barbe peinte sur la texture de peau : poils fins et irréguliers, couleur des cheveux
+async function buildBeardSkin(core, skinPath, beard, color) {
+  const key = `${skinPath}|${beard.id}|${color}`;
+  if (beardCache[key]) return beardCache[key];
+  const [skin, mask] = await Promise.all([loadImg(ASSETS + skinPath.replace(/^tex\//, '')), loadImg(ASSETS + `beard-${beard.mask}.png`)]);
+  const W = skin.width, H = skin.height;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const x = c.getContext('2d'); x.drawImage(skin, 0, 0);
+  const m = document.createElement('canvas'); m.width = W; m.height = H;
+  const mx = m.getContext('2d'); mx.drawImage(mask, 0, 0, W, H);
+  const md = mx.getImageData(0, 0, W, H).data;
+  let x0 = W, y0 = H, x1 = 0, y1 = 0;
+  for (let j = 0; j < H; j += 4) for (let i = 0; i < W; i += 4) if (md[(j * W + i) * 4 + 3] > 0) { if (i < x0) x0 = i; if (i > x1) x1 = i; if (j < y0) y0 = j; if (j > y1) y1 = j; }
+  if (x1 > x0) {
+    x0 = Math.max(0, x0 - 4); y0 = Math.max(0, y0 - 4); x1 = Math.min(W - 1, x1 + 4); y1 = Math.min(H - 1, y1 + 4);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, img = x.getImageData(x0, y0, w, h), d = img.data;
+    const hc = new THREE.Color(color), hr = hc.r * 255 * 0.85, hg = hc.g * 255 * 0.85, hb = hc.b * 255 * 0.85;
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const a = md[((j + y0) * W + (i + x0)) * 4 + 3] / 255; if (a <= 0) continue;
+      const o = (j * w + i) * 4;
+      const r = Math.random();
+      const grain = beard.id === 'stubble' ? (r < 0.5 ? 1 : 0.3) : 0.72 + 0.28 * r;
+      const k = Math.min(1, a * 1.3) * beard.density * beard.mix * grain;
+      d[o] += (hr - d[o]) * k; d[o + 1] += (hg - d[o + 1]) * k; d[o + 2] += (hb - d[o + 2]) * k;
+    }
+    x.putImageData(img, x0, y0);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO;
+  beardCache[key] = t;
+  return t;
+}
+
+let FABRIC = null;
+function fabricNormal() {
+  if (FABRIC) return FABRIC;
+  const S = 128, c = document.createElement('canvas'); c.width = c.height = S;
+  const x = c.getContext('2d'), img = x.createImageData(S, S), h = new Float32Array(S * S);
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    // mailles jersey : petites côtes verticales + grain
+    const rib = Math.sin((i / S) * Math.PI * 2 * 16) * 0.5 + 0.5;
+    const knit = Math.sin((j / S) * Math.PI * 2 * 32 + Math.sin((i / S) * Math.PI * 2 * 16) * 1.2) * 0.25;
+    h[j * S + i] = rib * 0.6 + knit + Math.random() * 0.25;
+  }
+  for (let j = 0; j < S; j++) for (let i = 0; i < S; i++) {
+    const hx = h[j * S + ((i + 1) % S)] - h[j * S + ((i - 1 + S) % S)];
+    const hy = h[((j + 1) % S) * S + i] - h[((j - 1 + S) % S) * S + i];
+    const o = (j * S + i) * 4, len = Math.hypot(hx, hy, 1);
+    img.data[o] = (-hx / len * 0.5 + 0.5) * 255; img.data[o + 1] = (-hy / len * 0.5 + 0.5) * 255; img.data[o + 2] = (1 / len * 0.5 + 0.5) * 255; img.data[o + 3] = 255;
+  }
+  x.putImageData(img, 0, 0);
+  FABRIC = new THREE.CanvasTexture(c);
+  FABRIC.wrapS = FABRIC.wrapT = THREE.RepeatWrapping; FABRIC.repeat.set(36, 36); FABRIC.anisotropy = 4;
+  return FABRIC;
+}
+
 // --------------------------------------------------------------- morphing
+// aisance des vêtements : itérations de « drapé » et épaisseur d'air (dm)
+const GARMENT_FIT = { 'g-tee': { it: 30, ease: 0.11 }, 'g-tank': { it: 30, ease: 0.1 }, 'g-long': { it: 24, ease: 0.08 }, 'g-crop': { it: 8, ease: 0.015 } };
+const FACE_KEYS = new Set(['nosew', 'nosel', 'nosehump', 'nosetip', 'mouthw', 'lips', 'jaw', 'chin', 'chinw', 'cheeks', 'facefat', 'faceshape']);
 function macroWeights(look) {
   const sex = clamp(look.sex, 0, 1);
   const g = { female: 1 - sex, male: sex };
@@ -167,9 +243,12 @@ function macroWeights(look) {
     if (hn < 0.5) out[`h-${gn}-minheight`] = g[gn] * (0.5 - hn) * 2;
     else out[`h-${gn}-maxheight`] = g[gn] * (hn - 0.5) * 2;
     out[`e-${gn}`] = g[gn];
+    out[`p-${gn}`] = g[gn] * 0.6; // proportions harmonieuses (jambes, tête, épaules)
   }
   for (const [k, v] of Object.entries(look.d || {})) {
-    if (v > 0) out[`d-${k}-incr`] = v; else if (v < 0) out[`d-${k}-decr`] = -v;
+    // amplitude limitée : les extrêmes restent crédibles
+    const s = FACE_KEYS.has(k) ? 0.8 : 0.6;
+    if (v > 0) out[`d-${k}-incr`] = v * s; else if (v < 0) out[`d-${k}-decr`] = -v * s;
   }
   return out;
 }
@@ -248,52 +327,54 @@ function skinVerts(sk, P, N, si, sw, outP, outN, used) {
 // --------------------------------------------------------------- poses
 // Rotations en degrés (x, y, z) appliquées aux os (repères alignés sur le monde au repos, pose en A).
 const P = (o) => o;
+// Poses définies par la direction des membres (repère du buste : x = gauche de l'avatar, y = haut, z = avant).
+// Le moteur calcule les rotations : les gestes restent naturels quelle que soit la morphologie.
+const V3 = (x, y, z) => new THREE.Vector3(x, y, z).normalize();
+const arm = (up, fore, twist = 8, fist = 0.12) => ({ up, fore, twist, fist });
 const POSES = {
-  idle: P({
-    'upperarm01.L': [4, 0, -34], 'upperarm01.R': [4, 0, 34],
-    'lowerarm01.L': [-10, 0, -4], 'lowerarm01.R': [-10, 0, 4],
-    'upperleg01.L': [0, 0, -5], 'upperleg01.R': [0, 0, 5],
-    'lowerleg01.L': [0, 0, 1.5], 'lowerleg01.R': [0, 0, -1.5],
-    'foot.L': [0, -6, 2], 'foot.R': [0, 6, -2]
-  }),
-  flex: P({
-    'clavicle.L': [0, 0, 8], 'clavicle.R': [0, 0, -8],
-    'upperarm01.L': [0, -8, 52], 'upperarm01.R': [0, 8, -52],
-    'lowerarm01.L': [0, -10, 118], 'lowerarm01.R': [0, 10, -118],
-    'wrist.L': [0, 0, 18], 'wrist.R': [0, 0, -18],
-    'spine02': [-4, 0, 0], 'neck02': [6, 0, 0],
-    'upperleg01.L': [0, 0, 1], 'upperleg01.R': [0, 0, -1],
-    'foot.L': [0, -10, 0], 'foot.R': [0, 10, 0],
-    fist: 1
-  }),
-  wave: P({
-    'upperarm01.L': [4, 0, -34], 'upperarm01.R': [0, 15, -40],
-    'lowerarm01.L': [-10, 0, -4], 'lowerarm01.R': [0, 0, -95],
-    'upperleg01.L': [0, 0, -3.5], 'upperleg01.R': [0, 0, 3.5],
-    'neck02': [0, -8, 4], 'spine03': [0, 0, -3],
-    'foot.L': [0, -6, 2], 'foot.R': [0, 6, -2]
-  }),
-  cheer: P({
-    'upperarm01.L': [0, 0, 78], 'upperarm01.R': [0, 0, -78],
-    'lowerarm01.L': [0, 0, 18], 'lowerarm01.R': [0, 0, -18],
-    'spine02': [-8, 0, 0], 'neck02': [-14, 0, 0],
-    'upperleg01.L': [0, 0, -2], 'upperleg01.R': [0, 0, 2],
-    fist: 1
-  }),
-  squat: P({
-    'upperarm01.L': [-60, 0, -12], 'upperarm01.R': [-60, 0, 12],
-    'lowerarm01.L': [-20, 0, 0], 'lowerarm01.R': [-20, 0, 0],
-    'upperleg01.L': [-75, 0, -2], 'upperleg01.R': [-75, 0, 2],
-    'lowerleg01.L': [95, 0, 0], 'lowerleg01.R': [95, 0, 0],
-    'foot.L': [-20, -6, 0], 'foot.R': [-20, 6, 0],
-    'spine04': [-14, 0, 0], 'spine02': [-6, 0, 0], 'neck02': [14, 0, 0],
-    fist: 0.6, drop: 1
-  })
+  idle: {
+    L: arm(V3(0.17, -1, 0.03), V3(0.1, -1, 0.2), 6, 0.15), R: arm(V3(-0.17, -1, 0.03), V3(-0.1, -1, 0.2), 6, 0.15),
+    legs: { thigh: V3(0.05, -1, 0.01), shin: V3(0.03, -1, -0.02), toe: 7 }
+  },
+  flex: {
+    L: arm(V3(1, 0.16, 0.1), V3(-0.38, 1, 0.12), -75, 1), R: arm(V3(-1, 0.16, 0.1), V3(0.38, 1, 0.12), -75, 1),
+    legs: { thigh: V3(0.09, -1, 0), shin: V3(0.08, -1, 0), toe: 12 },
+    spine: [-5, 0, 0], neck: [4, 0, 0], drop: 0.01
+  },
+  wave: {
+    L: arm(V3(0.17, -1, 0.03), V3(0.1, -1, 0.2), 6, 0.15), R: arm(V3(-0.9, 0.22, 0.28), V3(-0.12, 1, 0.1), 80, 0), wave: true,
+    legs: { thigh: V3(0.05, -1, 0.01), shin: V3(0.03, -1, -0.02), toe: 7 },
+    spine: [0, 0, -3], neck: [-3, -10, 4]
+  },
+  cheer: {
+    L: arm(V3(0.5, 0.86, 0.12), V3(0.3, 1, 0.05), -10, 1), R: arm(V3(-0.5, 0.86, 0.12), V3(-0.3, 1, 0.05), -10, 1),
+    legs: { thigh: V3(0.07, -1, 0), shin: V3(0.05, -1, 0), toe: 9 },
+    spine: [-7, 0, 0], neck: [-14, 0, 0]
+  },
+  squat: {
+    L: arm(V3(0.16, 0.02, 1), V3(0.12, 0.05, 1), 40, 0.6), R: arm(V3(-0.16, 0.02, 1), V3(-0.12, 0.05, 1), 40, 0.6),
+    legs: { thigh: V3(0.3, -0.12, 1), shin: V3(0.12, -1, -0.32), toe: 14 },
+    spine: [16, 0, 0], neck: [-12, 0, 0], drop: 0.24
+  },
+  crouch: {
+    L: arm(V3(0.25, -0.9, -0.3), V3(0.2, -0.9, -0.1), 6, 0.4), R: arm(V3(-0.25, -0.9, -0.3), V3(-0.2, -0.9, -0.1), 6, 0.4),
+    legs: { thigh: V3(0.1, -0.7, 0.7), shin: V3(0.05, -1, -0.45), toe: 8 },
+    spine: [14, 0, 0], neck: [-8, 0, 0], drop: 0.11
+  },
+  air: {
+    L: arm(V3(0.45, 0.88, 0.05), V3(0.3, 1, 0), -5, 0.9), R: arm(V3(-0.45, 0.88, 0.05), V3(-0.3, 1, 0), -5, 0.9),
+    legs: { thigh: V3(0.06, -1, 0.15), shin: V3(0.04, -1, -0.3), toe: 7 },
+    spine: [-6, 0, 0], neck: [-10, 0, 0]
+  }
+};
+const mixPose = (a, b, w) => {
+  const lerp = (u, v) => u.clone().lerp(v, w).normalize();
+  const side = (p, q) => ({ up: lerp(p.up, q.up), fore: lerp(p.fore, q.fore), twist: p.twist + (q.twist - p.twist) * w, fist: p.fist + (q.fist - p.fist) * w });
+  const e = (p = [0, 0, 0], q = [0, 0, 0]) => p.map((v, i) => v + (q[i] - v) * w);
+  return { L: side(a.L, b.L), R: side(a.R, b.R), legs: { thigh: lerp(a.legs.thigh, b.legs.thigh), shin: lerp(a.legs.shin, b.legs.shin), toe: a.legs.toe + (b.legs.toe - a.legs.toe) * w }, spine: e(a.spine, b.spine), neck: e(a.neck, b.neck), drop: (a.drop || 0) + ((b.drop || 0) - (a.drop || 0)) * w, wave: w > 0.5 ? b.wave : a.wave };
 };
 
 const FINGERS = ['finger1', 'finger2', 'finger3', 'finger4', 'finger5'];
-let FINGER_SIGN = -1, TWIST = 8;
-export function _tune(fs, tw) { FINGER_SIGN = fs; TWIST = tw; }
 
 export class Avatar {
   constructor(canvas, opts = {}) {
@@ -400,7 +481,7 @@ export class Avatar {
     if (L.brows) want.brows = L.brows;
     if (L.top) want.top = L.top;
     if (L.bottom) want.bottom = L.bottom;
-    if (L.socks && !L.shoes) want.socks = 'c-socks';
+    if (L.shoes && L.socks !== false) want.socks = 'g-socks';
     if (L.shoes) want.shoes = L.shoes;
     if (L.watch) want.watch = 'c-watch';
     // jamais d'avatar dénudé : un bas est toujours porté, et un haut pour les silhouettes féminines
@@ -458,7 +539,7 @@ export class Avatar {
     };
     mat.customProgramCacheKey = () => 'garment';
     const mesh = new THREE.Mesh(g, mat);
-    mesh.frustumCulled = false; mesh.renderOrder = slot === 'top' ? 3 : 2;
+    mesh.frustumCulled = false; mesh.renderOrder = slot === 'top' ? 3 : slot === 'socks' ? 1 : 2;
     mesh.userData.used = Uint32Array.from(new Set(idx));
     this.root.add(mesh);
     return mesh;
@@ -468,13 +549,23 @@ export class Avatar {
     const L = this.look, core = this.core;
     const tone = SKIN_TONES[clamp(L.skin | 0, 0, SKIN_TONES.length - 1)];
     const sexKey = L.sex >= 0.5 ? 'm' : 'f';
-    this.skinMat.map = tex(core, core.meta.skins[`${tone.tex}-${sexKey}`]);
+    const skinPath = core.meta.skins[`${tone.tex}-${sexKey}`];
+    const beard = BEARDS.find((b) => b.id === L.beard && b.mask);
+    if (beard) {
+      const key = `${skinPath}|${beard.id}|${L.hairColor}`;
+      if (this._skinKey !== key) {
+        this._skinKey = key;
+        buildBeardSkin(core, skinPath, beard, L.hairColor).then((t) => { if (this._skinKey === key) { this.skinMat.map = t; this.skinMat.needsUpdate = true; } });
+      }
+    } else { this._skinKey = null; this.skinMat.map = tex(core, skinPath); }
     this.skinMat.color.set(tone.tint);
     this.skinMat.needsUpdate = true;
     for (const [slot, m] of Object.entries(this.meshes)) {
       if (m.garment) {
         const mat = m.mesh.material;
-        mat.color.set(slot === 'top' ? L.topColor : L.bottomColor);
+        mat.color.set(slot === 'top' ? L.topColor : slot === 'socks' ? '#eceef1' : L.bottomColor);
+        mat.normalMap = fabricNormal(); mat.normalScale.set(0.45, 0.45);
+        mat.roughness = 0.86;
         mat.sheenColor.set(mat.color).multiplyScalar(0.6);
         mat.needsUpdate = true;
         continue;
@@ -493,12 +584,14 @@ export class Avatar {
       } else if (slot === 'lashes') {
         mat.color.set('#202020'); mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide;
       } else if (slot === 'eyes') {
-        mat.map = tex(core, `eye-${L.eyes}.webp`); mat.roughness = 0.12; mat.color.set('#d9d2cd');
+        const ec = eyeOf(L.eyes);
+        mat.map = tex(core, `eye-${ec.tex}.webp`); mat.roughness = 0.12; mat.color.set(ec.tint);
       } else if (slot === 'top') {
         mat.color.set(L.topColor); mat.roughness = 0.88; mat.side = THREE.DoubleSide;
         mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -6;
       } else if (slot === 'bottom') {
         mat.color.set(L.bottomColor); mat.roughness = 0.9; mat.side = THREE.DoubleSide;
+        mat.normalMap = fabricNormal(); mat.normalScale.set(0.35, 0.35);
       } else if (slot === 'socks') {
         mat.color.set('#f2f3f5'); mat.roughness = 0.95;
       }
@@ -548,6 +641,30 @@ export class Avatar {
         }
         [G, H] = [H, G];
       }
+      // hauts amples : le tissu tombe en pont par-dessus les creux (taille, entre les pectoraux, aisselles)
+      const cfg = GARMENT_FIT[m.key] || { it: 0, ease: 0 };
+      const clampOut = (all) => {
+        for (let v = 0; v < 13380; v++) {
+          if (!all && f[v] > 0.15) continue;
+          if (f[v] < -0.35) continue;
+          const o = v * 3, dx = G[o] - V[o], dy = G[o + 1] - V[o + 1], dz = G[o + 2] - V[o + 2];
+          const dn = dx * Nb[o] + dy * Nb[o + 1] + dz * Nb[o + 2];
+          if (dn < 0) { G[o] -= dn * Nb[o]; G[o + 1] -= dn * Nb[o + 1]; G[o + 2] -= dn * Nb[o + 2]; }
+        }
+      };
+      for (let it = 0; it < cfg.it; it++) {
+        H.set(G);
+        for (let v = 0; v < 13380; v++) {
+          if (f[v] < -0.2) continue;
+          const a = core.adjStart[v], b = core.adjStart[v + 1]; if (b === a) continue;
+          let x = 0, y2 = 0, z = 0;
+          for (let j = a; j < b; j++) { const u = core.adj[j] * 3; x += G[u]; y2 += G[u + 1]; z += G[u + 2]; }
+          const c = 1 / (b - a);
+          H[v * 3] = G[v * 3] * 0.4 + x * c * 0.6; H[v * 3 + 1] = G[v * 3 + 1] * 0.4 + y2 * c * 0.6; H[v * 3 + 2] = G[v * 3 + 2] * 0.4 + z * c * 0.6;
+        }
+        [G, H] = [H, G];
+        if (it % 2 === 1) clampOut(true);
+      }
       // tétons : lissage local renforcé
       for (let it = 0; it < 40; it++) {
         H.set(G);
@@ -571,7 +688,8 @@ export class Avatar {
       }
       // 2) épaisseur le long des normales de la surface lissée
       const NG = sharedNormals(G, nBase, core.bodyIndex, core.bodyMap); normalizeInPlace(NG);
-      for (let v = 0; v < nBase; v++) for (let k = 0; k < 3; k++) G[v * 3 + k] += NG[v * 3 + k] * th * 1.25;
+      const ease = (cfg.ease || 0) * s;
+      for (let v = 0; v < nBase; v++) for (let k = 0; k < 3; k++) G[v * 3 + k] += NG[v * 3 + k] * (th * 1.25 + ease * Math.min(1, Math.max(0, f[v] + 0.1) * 4));
       if (!m.normals) { m.normals = new THREE.BufferAttribute(new Float32Array(core.meta.body.nVerts * 3), 3); m.mesh.geometry.setAttribute('normal', m.normals); }
       gather(NG, core.bodyMap, m.normals.array); m.normals.needsUpdate = true;
       gather(G, core.bodyMap, gp);
@@ -614,6 +732,14 @@ export class Avatar {
     const heads = core.meta.bones.map((b) => mean(b.head, new THREE.Vector3()));
     const tails = core.meta.bones.map((b) => mean(b.tail, new THREE.Vector3()));
     this.boneAxis = {};
+    const hd = (n) => heads[core.meta.bones.findIndex((b) => b.name === n)];
+    this.restDir = {};
+    for (const side of ['L', 'R']) {
+      this.restDir['upperarm01.' + side] = new THREE.Vector3().subVectors(hd('lowerarm01.' + side), hd('upperarm01.' + side)).normalize();
+      this.restDir['lowerarm01.' + side] = new THREE.Vector3().subVectors(hd('wrist.' + side), hd('lowerarm01.' + side)).normalize();
+      this.restDir['upperleg01.' + side] = new THREE.Vector3().subVectors(hd('lowerleg01.' + side), hd('upperleg01.' + side)).normalize();
+      this.restDir['lowerleg01.' + side] = new THREE.Vector3().subVectors(hd('foot.' + side), hd('lowerleg01.' + side)).normalize();
+    }
     const bi = (n) => core.meta.bones.findIndex((b) => b.name === n);
     for (const side of ['L', 'R']) {
       const w = heads[bi('wrist.' + side)], a = heads[bi('finger2-1.' + side)], c = heads[bi('finger5-1.' + side)];
@@ -625,6 +751,8 @@ export class Avatar {
         const dir = new THREE.Vector3().subVectors(tails[i], heads[i]).normalize();
         const ax = new THREE.Vector3().crossVectors(dir, palm);
         this.boneAxis[b.name] = ax.lengthSq() > 1e-8 ? ax.normalize() : new THREE.Vector3(1, 0, 0);
+        // le pouce se replie devant les doigts (poing fermé), pas sur le côté
+        if (b.name.startsWith('finger1')) this.boneAxis[b.name].multiplyScalar(-0.7).addScaledVector(palm, 0.7).normalize();
       });
       for (const n of ['lowerarm02.', 'upperarm02.']) {
         const i = bi(n + side); this.boneAxis[n + side] = new THREE.Vector3().subVectors(tails[i], heads[i]).normalize();
@@ -650,30 +778,22 @@ export class Avatar {
   }
 
   play(name, ms = 2200) {
-    if (!POSES[name] && name !== 'jump') return;
+    if (name === 'jump') { this.jumpStart = performance.now(); this.pose = 'idle'; return; }
+    if (!POSES[name]) return;
     this.pose = name; this.poseUntil = performance.now() + ms;
-    if (name === 'jump') { this.jumpStart = performance.now(); this.pose = 'idle'; }
   }
 
-  _poseTargets(t) {
-    const base = POSES[this.pose] || POSES.idle;
-    const breathe = Math.sin(t * 1.6);
-    const sway = Math.sin(t * 0.55);
-    const tg = {};
-    for (const [k, v] of Object.entries(base)) if (Array.isArray(v)) tg[k] = v.slice();
-    const add = (k, x, y, z) => { tg[k] = tg[k] || [0, 0, 0]; tg[k][0] += x; tg[k][1] += y; tg[k][2] += z; };
-    // respiration, transfert du poids, regard
-    add('spine03', -0.8 * breathe, 0, 0); add('spine01', -0.8 * breathe, 0, 0);
-    add('clavicle.L', 0, 0, 0.8 * breathe); add('clavicle.R', 0, 0, -0.8 * breathe);
-    add('root', 0, 0, 1.2 * sway); add('spine04', 0, 0, -1.3 * sway); add('spine02', 0, 0.8 * Math.sin(t * 0.37), 0);
-    if (this.pose === 'idle' || this.pose === 'squat') {
-      add('upperarm01.L', 0, 0, 1.2 * Math.sin(t * 0.9 + 0.3)); add('upperarm01.R', 0, 0, -1.2 * Math.sin(t * 0.9));
-    }
-    if (this.pose === 'wave') add('lowerarm01.R', 0, 0, 22 * Math.sin(t * 9));
-    const lx = this.lookTarget.x, ly = this.lookTarget.y;
-    add('neck02', -ly * 8 + 1.5 * Math.sin(t * 0.31), lx * 18 + 6 * Math.sin(t * 0.23), 0);
-    add('head', -ly * 6, lx * 12, 1.2 * Math.sin(t * 0.4));
-    return { tg, fist: base.fist || 0, drop: base.drop || 0 };
+  _currentPose(t, now) {
+    let P = POSES[this.pose] || POSES.idle;
+    if (this.jumpStart) {
+      const u = (now - this.jumpStart) / 1100;
+      if (u >= 1) this.jumpStart = 0;
+      else if (u < 0.28) P = mixPose(POSES.idle, POSES.crouch, Math.sin((u / 0.28) * Math.PI * 0.5));
+      else if (u < 0.8) P = mixPose(POSES.crouch, POSES.air, Math.min(1, (u - 0.28) / 0.12));
+      else P = mixPose(POSES.air, POSES.crouch, Math.sin(((u - 0.8) / 0.2) * Math.PI) * 0.7);
+      this.jumpY = u >= 0.28 && u < 0.8 ? Math.sin(((u - 0.28) / 0.52) * Math.PI) * 0.22 : 0;
+    } else this.jumpY = 0;
+    return P;
   }
 
   _frame() {
@@ -681,54 +801,91 @@ export class Avatar {
     const t = now / 1000;
     if (this.pose !== 'idle' && now > this.poseUntil) this.pose = 'idle';
     const dt = Math.min(0.12, this.clock.getDelta() || 0.016);
-    const k = 1 - Math.exp(-dt * 7);
-    const { tg, fist, drop } = this._poseTargets(t);
-    this.fist += (fist - this.fist) * k;
-    this.drop += (drop - this.drop) * k;
-    const curl = 9 + this.fist * 71;
-    const axisAng = {};
-    for (const f of FINGERS) for (const sg of ['1', '2', '3']) for (const side of ['L', 'R']) {
-      const thumb = f === 'finger1';
-      axisAng[`${f}-${sg}.${side}`] = (thumb ? curl * 0.45 : curl * (sg === '1' ? 0.75 : 1.05)) * FINGER_SIGN;
+    const k = 1 - Math.exp(-dt * (this.jumpStart ? 14 : 6));
+    const P = this._currentPose(t, now);
+    const B = this.bones, nb = B.length, names = this.boneNames || (this.boneNames = B.map((b) => b.name));
+    const breathe = Math.sin(t * 1.5), sway = Math.sin(t * 0.5);
+    const lx = this.lookTarget.x, ly = this.lookTarget.y;
+    // rotations simples (buste, cou, tête), en degrés
+    const eul = {
+      root: [0, 0, 1.0 * sway],
+      spine04: [(P.spine?.[0] || 0) * 0.4, 0, -1.1 * sway],
+      spine03: [(P.spine?.[0] || 0) * 0.3 - 0.7 * breathe, 0.6 * Math.sin(t * 0.37), (P.spine?.[2] || 0) * 0.5],
+      spine02: [(P.spine?.[0] || 0) * 0.3 - 0.5 * breathe, 0, (P.spine?.[2] || 0) * 0.5],
+      neck02: [(P.neck?.[0] || 0) - ly * 8 + 1.2 * Math.sin(t * 0.31), (P.neck?.[1] || 0) + lx * 16 + 5 * Math.sin(t * 0.23), P.neck?.[2] || 0],
+      head: [-ly * 6, lx * 10, 1.0 * Math.sin(t * 0.4)],
+      'clavicle.L': [0, 0, 0.7 * breathe + (P.L.up.y > 0.3 ? 9 : 0)], 'clavicle.R': [0, 0, -0.7 * breathe - (P.R.up.y > 0.3 ? 9 : 0)]
+    };
+    // directions des membres (repère du buste), avec petits mouvements de vie
+    const armDirs = {};
+    for (const side of ['L', 'R']) {
+      const a = P[side], sg = side === 'L' ? 1 : -1;
+      const up = a.up.clone(), fore = a.fore.clone();
+      if (a.up.y < -0.5) { up.x += sg * 0.02 * Math.sin(t * 0.9 + (sg > 0 ? 0 : 1.3)); up.z += 0.03 * Math.sin(t * 0.7 + sg); }
+      if (P.wave && side === 'R') fore.x += 0.38 * Math.sin(t * 8);
+      armDirs[side] = { up: up.normalize(), fore: fore.normalize(), twist: a.twist, fist: a.fist };
     }
-    const twist = (tg.twist || [0, 0]);
-    axisAng['lowerarm02.L'] = (POSES[this.pose]?.twist?.[0] ?? TWIST) ; axisAng['lowerarm02.R'] = -(POSES[this.pose]?.twist?.[1] ?? TWIST);
-    this.bones.forEach((bone, i) => {
-      const r = tg[bone.name];
-      const ax = axisAng[bone.name];
-      if (ax !== undefined && this.boneAxis && this.boneAxis[bone.name]) this.tmpQ.setFromAxisAngle(this.boneAxis[bone.name], ax * DEG);
-      else if (r) { this.tmpE.set(r[0] * DEG, r[1] * DEG, r[2] * DEG, 'XYZ'); this.tmpQ.setFromEuler(this.tmpE); }
-      else this.tmpQ.identity();
-      this.curQ[i].slerp(this.tmpQ, k).normalize();
-      bone.quaternion.copy(this.curQ[i]);
-      bone.position.copy(this.restPos[i]);
-    });
-    // saut
-    let jy = 0;
-    if (this.jumpStart) {
-      const u = (now - this.jumpStart) / 900;
-      if (u >= 1) this.jumpStart = 0;
-      else {
-        const crouch = u < 0.25 ? Math.sin(u / 0.25 * Math.PI) : 0;
-        const air = u >= 0.25 && u < 0.85 ? Math.sin((u - 0.25) / 0.6 * Math.PI) : 0;
-        const land = u >= 0.85 ? Math.sin((u - 0.85) / 0.15 * Math.PI) * 0.6 : 0;
-        jy = air * 0.35 * this.modelHeight - (crouch + land) * 0.04 * this.modelHeight;
-        const bend = (crouch + land) * 35;
-        for (const side of ['L', 'R']) {
-          const s = side === 'L' ? 1 : -1;
-          this.boneByName[`upperleg01.${side}`].quaternion.multiply(this.tmpQ.setFromEuler(this.tmpE.set(-bend * DEG, 0, 0)));
-          this.boneByName[`lowerleg01.${side}`].quaternion.multiply(this.tmpQ.setFromEuler(this.tmpE.set(bend * 2 * DEG, 0, 0)));
-          this.boneByName[`upperarm01.${side}`].quaternion.multiply(this.tmpQ.setFromEuler(this.tmpE.set(0, 0, s * air * 40 * DEG)));
-        }
-      }
+    const W = this.tgtW || (this.tgtW = B.map(() => new THREE.Quaternion()));
+    const L = this.tgtL || (this.tgtL = B.map(() => new THREE.Quaternion()));
+    const q1 = this.tmpQ, q2 = this.tmpQ2 || (this.tmpQ2 = new THREE.Quaternion()), inv = this.tmpQ3 || (this.tmpQ3 = new THREE.Quaternion());
+    const fistAmt = { L: armDirs.L.fist, R: armDirs.R.fist };
+    const chestIdx = names.indexOf('spine01'), hipIdx = names.indexOf('root');
+    const aimLocal = (i, refIdx, restDir, dir, twistDeg) => {
+      // rotation monde voulue = repère de référence * (repos -> direction), puis torsion autour du membre
+      q1.setFromUnitVectors(restDir, dir);
+      if (twistDeg) { q2.setFromAxisAngle(dir, twistDeg * DEG); q1.premultiply(q2); }
+      q1.premultiply(W[refIdx]);
+      const p = this.parentIdx[i];
+      inv.copy(W[p]).invert();
+      L[i].copy(inv).multiply(q1);
+    };
+    for (let i = 0; i < nb; i++) {
+      const n = names[i], p = this.parentIdx[i];
+      const side = n.endsWith('.L') ? 'L' : n.endsWith('.R') ? 'R' : null;
+      const pw = p >= 0 ? W[p] : null;
+      const e = eul[n];
+      if (side && (n.startsWith('upperarm01') || n.startsWith('lowerarm01'))) {
+        const d = armDirs[side];
+        if (n.startsWith('upperarm01')) aimLocal(i, chestIdx, this.restDir[n], d.up, 0);
+        else aimLocal(i, chestIdx, this.restDir[n], d.fore, 0);
+      } else if (side && (n.startsWith('upperleg01') || n.startsWith('lowerleg01'))) {
+        const sg = side === 'L' ? 1 : -1, lg = P.legs;
+        const dir = n.startsWith('upperleg01') ? new THREE.Vector3(lg.thigh.x * sg, lg.thigh.y, lg.thigh.z) : new THREE.Vector3(lg.shin.x * sg, lg.shin.y, lg.shin.z);
+        aimLocal(i, hipIdx, this.restDir[n], dir.normalize(), 0);
+      } else if (side && n.startsWith('foot')) {
+        // pied à plat, légèrement tourné vers l'extérieur
+        const sg = side === 'L' ? 1 : -1;
+        q1.setFromAxisAngle(new THREE.Vector3(0, 1, 0), sg * P.legs.toe * DEG).premultiply(W[hipIdx]);
+        inv.copy(W[p]).invert(); L[i].copy(inv).multiply(q1);
+      } else if (side && n.startsWith('lowerarm02')) {
+        L[i].setFromAxisAngle(this.boneAxis[n], (side === 'L' ? 1 : -1) * armDirs[side].twist * DEG);
+      } else if (side && n.startsWith('finger') && this.boneAxis[n]) {
+        const curl = 8 + fistAmt[side] * 74, thumb = n.startsWith('finger1'), seg = n[n.indexOf('-') + 1];
+        L[i].setFromAxisAngle(this.boneAxis[n], -(thumb ? curl * 0.45 : curl * (seg === '1' ? 0.78 : 1.05)) * DEG);
+      } else if (e) {
+        this.tmpE.set(e[0] * DEG, e[1] * DEG, e[2] * DEG, 'XYZ'); L[i].setFromEuler(this.tmpE);
+      } else L[i].identity();
+      W[i].copy(pw || this.identQ || (this.identQ = new THREE.Quaternion())).multiply(L[i]);
     }
+    for (let i = 0; i < nb; i++) {
+      this.curQ[i].slerp(L[i], k).normalize();
+      B[i].quaternion.copy(this.curQ[i]);
+      B[i].position.copy(this.restPos[i]);
+    }
+    this.drop += ((P.drop || 0) - this.drop) * k;
+    const jy = (this.jumpY || 0) * this.modelHeight;
     const rootBone = this.bones[0];
-    rootBone.position.y += jy - this.drop * 0.22 * this.modelHeight + Math.sin(t * 1.6) * 0.002 * this.modelHeight;
+    rootBone.position.y += jy - this.drop * this.modelHeight + Math.sin(t * 1.5) * 0.002 * this.modelHeight;
     rootBone.position.x += Math.sin(t * 0.55) * 0.006 * this.modelHeight;
     this._skin();
     // rotation (glisser)
     if (!this.dragging) { this.yaw += this.yawVel; this.yawVel *= 0.92; if (this.opts.autoRotate) this.yaw += dt * 0.25; }
     this.root.rotation.y = this.yaw;
+    if (this.camPos) {
+      const g = this._cameraGoal(), kc = 1 - Math.exp(-dt * 5);
+      this.camPos.lerp(g.pos, kc); this.camLook.lerp(g.look, kc);
+      this.camera.position.copy(this.camPos); this.camera.lookAt(this.camLook);
+    }
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -770,18 +927,26 @@ export class Avatar {
     this._frameCamera();
   }
 
-  _frameCamera() {
-    const H = this.modelHeight || 18;
-    const cam = this.camera;
-    if (this.opts.framing === 'bust') {
-      cam.fov = 18; cam.position.set(0, H * 0.82, H * 2.4); cam.lookAt(0, H * 0.8, 0);
-    } else {
-      const fitH = H * 1.12, fitW = H * 0.62;
-      const vf = 2 * Math.tan((cam.fov * DEG) / 2);
+  _cameraGoal() {
+    const H = this.modelHeight || 18, cam = this.camera, vf = 2 * Math.tan((cam.fov * DEG) / 2);
+    if (this.opts.framing === 'face') {
+      const hy = H * 0.915;
+      const fitH = H * 0.25, fitW = H * 0.19;
       const dist = Math.max(fitH / vf, fitW / (vf * cam.aspect));
-      cam.position.set(0, H * 0.56, dist); cam.lookAt(0, H * 0.5, 0);
+      return { pos: new THREE.Vector3(0, hy, dist + H * 0.06), look: new THREE.Vector3(0, hy, 0) };
     }
-    cam.updateProjectionMatrix();
+    const fitH = H * 1.12, fitW = H * 0.62;
+    const dist = Math.max(fitH / vf, fitW / (vf * cam.aspect));
+    return { pos: new THREE.Vector3(0, H * 0.56, dist), look: new THREE.Vector3(0, H * 0.5, 0) };
+  }
+
+  setFraming(mode) { this.opts.framing = mode; }
+
+  _frameCamera(instant = true) {
+    const g = this._cameraGoal();
+    if (instant || !this.camPos) { this.camPos = g.pos.clone(); this.camLook = g.look.clone(); }
+    this.camera.position.copy(this.camPos); this.camera.lookAt(this.camLook);
+    this.camera.updateProjectionMatrix();
   }
 
   _bindInput() {

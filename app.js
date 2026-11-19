@@ -1,5 +1,5 @@
 // Kinetic — application
-import { Avatar, SKIN_TONES, EYE_COLORS, DEFAULT_LOOK } from './avatar.js';
+import { Avatar, SKIN_TONES, EYE_COLORS, BEARDS, DEFAULT_LOOK } from './avatar.js';
 import { EXERCISES, PROGRAMS, BADGES } from './data.js';
 import { store, levelInfo, epley, stats, nextSession, advanceProgram, checkBadges, idb, uid, weekKey } from './store.js';
 import { sfx, configureSound } from './sound.js';
@@ -386,10 +386,24 @@ routes.avatar = (arg) => {
       <button class="btn ghost sm mt12" id="reset-zones">Remettre les zones à zéro</button>`,
     visage: () => `
       <div class="kicker">YEUX</div>
-      <div class="swatches eyes">${EYE_COLORS.map((c) => `<button class="sw eye ${look.eyes === c ? 'on' : ''}" style="background-image:url(eye-${c}.webp)" data-k="eyes" data-v="${c}" aria-label="${EYE_NAMES[c]}" title="${EYE_NAMES[c]}"></button>`).join('')}</div>
+      <div class="swatches">${EYE_COLORS.map((c) => `<button class="sw ${look.eyes === c.id || (!EYE_COLORS.some((e) => e.id === look.eyes) && c.id === 'brown') ? 'on' : ''}" style="--c:${c.sw}" data-k="eyes" data-v="${c.id}" aria-label="${c.name}" title="${c.name}"></button>`).join('')}</div>
+      <div class="kicker mt12">PILOSITÉ FACIALE</div>
+      ${chips('beard', BEARDS.map((b) => [b.id, b.name]))}
+      <p class="tiny muted">Elle prend la couleur des cheveux.</p>
       <div class="kicker mt12">SOURCILS</div>
       ${chips('brows', BROWS.map((b, i) => [b, `Style ${i + 1}`]))}
-      <p class="tiny muted mt12">Les sourcils prennent la couleur des cheveux (onglet Cheveux).</p>`,
+      <details class="more mt12" open><summary>Nez</summary>
+        ${slider('nosew', 'Largeur', -1, 1, 0.01, look.d.nosew || 0, 'z', true)}${slider('nosel', 'Longueur', -1, 1, 0.01, look.d.nosel || 0, 'z', true)}
+        ${slider('nosehump', 'Bosse', -1, 1, 0.01, look.d.nosehump || 0, 'z', true)}${slider('nosetip', 'Pointe · basse ↔ relevée', -1, 1, 0.01, look.d.nosetip || 0, 'z', true)}</details>
+      <details class="more"><summary>Bouche</summary>
+        ${slider('mouthw', 'Largeur', -1, 1, 0.01, look.d.mouthw || 0, 'z', true)}${slider('lips', 'Épaisseur des lèvres', -1, 1, 0.01, look.d.lips || 0, 'z', true)}</details>
+      <details class="more"><summary>Mâchoire et menton</summary>
+        ${slider('jaw', 'Mâchoire marquée', -1, 1, 0.01, look.d.jaw || 0, 'z', true)}${slider('chinw', 'Largeur du menton', -1, 1, 0.01, look.d.chinw || 0, 'z', true)}
+        ${slider('chin', 'Menton en avant', -1, 1, 0.01, look.d.chin || 0, 'z', true)}</details>
+      <details class="more"><summary>Forme du visage</summary>
+        ${slider('faceshape', 'Ovale ↔ carré', -1, 1, 0.01, look.d.faceshape || 0, 'z', true)}${slider('facefat', 'Fin ↔ rond', -1, 1, 0.01, look.d.facefat || 0, 'z', true)}
+        ${slider('cheeks', 'Pommettes', -1, 1, 0.01, look.d.cheeks || 0, 'z', true)}</details>
+      <button class="btn ghost sm mt12" id="reset-face">Remettre le visage à zéro</button>`,
     cheveux: () => `<div class="kicker">COUPE</div>${chips('hair', HAIRS)}<div class="kicker mt12">COULEUR (CHEVEUX ET SOURCILS)</div>${sw('hairColor', HAIR_COLORS)}`,
     peau: () => `<div class="kicker">TEINTE DE PEAU</div><div class="swatches big">${SKIN_TONES.map((t, i) => `<button class="sw skin ${look.skin === i ? 'on' : ''}" style="--c:${t.sw}" data-k="skin" data-v="${i}" aria-label="${t.name}" title="${t.name}"></button>`).join('')}</div>`,
     tenue: () => `
@@ -403,7 +417,7 @@ routes.avatar = (arg) => {
   const panel = $('#panel');
   const draw = () => { panel.innerHTML = panels[tab](); };
   draw();
-  $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.t; [...$('#tabs').children].forEach((x) => x.classList.toggle('on', x === b)); draw(); panel.scrollTop = 0; });
+  $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; tab = b.dataset.t; avatar?.setFraming(['visage', 'cheveux'].includes(tab) ? 'face' : 'full'); [...$('#tabs').children].forEach((x) => x.classList.toggle('on', x === b)); draw(); panel.scrollTop = 0; });
   $('#mode').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.m; [...$('#mode').children].forEach((x) => x.classList.toggle('on', x === b)); $('#stage').className = 'editor-stage mode-' + mode; avatar?._resize(); });
   panel.addEventListener('input', (e) => {
     const t = e.target;
@@ -419,7 +433,8 @@ routes.avatar = (arg) => {
   panel.addEventListener('click', (e) => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.id === 'bmi') { hideBmi = !hideBmi; draw(); return; }
-    if (b.id === 'reset-zones') { for (const k of Object.keys(look.d)) look.d[k] = 0; draw(); apply(); return; }
+    if (b.id === 'reset-zones') { for (const [k] of ZONES) look.d[k] = 0; draw(); apply(); return; }
+    if (b.id === 'reset-face') { for (const k of ['nosew', 'nosel', 'nosehump', 'nosetip', 'mouthw', 'lips', 'jaw', 'chin', 'chinw', 'cheeks', 'facefat', 'faceshape']) look.d[k] = 0; draw(); apply(); return; }
     if (b.id === 'watch') { look.watch = !look.watch; b.classList.toggle('on', look.watch); apply(); return; }
     const k = b.dataset.k; if (!k) return;
     let v = b.dataset.v;
@@ -437,7 +452,7 @@ routes.avatar = (arg) => {
     location.hash = '#home';
     if (first) setTimeout(() => { avatar?.play('wave', 2200); celebrate('C’EST PARTI', [`Programme : ${PROGRAMS[store.s.program.id].name}`, 'Touche ton avatar pour le faire réagir.']); }, 400);
   });
-  return () => { if (photoURL) URL.revokeObjectURL(photoURL); if (avatar && JSON.stringify(avatar.look) !== JSON.stringify(store.s.look)) avatar.setLook(store.s.look); };
+  return () => { avatar?.setFraming('full'); if (photoURL) URL.revokeObjectURL(photoURL); if (avatar && JSON.stringify(avatar.look) !== JSON.stringify(store.s.look)) avatar.setLook(store.s.look); };
 };
 
 // ---------------------------------------------------------------- programmes et historique muscu
