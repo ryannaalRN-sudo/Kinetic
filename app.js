@@ -290,7 +290,7 @@ routes.avatar = (arg) => {
       <button class="btn ghost sm mt12" id="reset-zones">Remettre les zones à zéro</button>`,
     visage: () => `
       <div class="kicker">YEUX</div>
-      <div class="swatches eyes">${EYE_COLORS.map((c) => `<button class="sw eye ${look.eyes === c ? 'on' : ''}" style="background-image:url(assets/tex/eye-${c}.webp)" data-k="eyes" data-v="${c}" aria-label="${EYE_NAMES[c]}" title="${EYE_NAMES[c]}"></button>`).join('')}</div>
+      <div class="swatches eyes">${EYE_COLORS.map((c) => `<button class="sw eye ${look.eyes === c ? 'on' : ''}" style="background-image:url(eye-${c}.webp)" data-k="eyes" data-v="${c}" aria-label="${EYE_NAMES[c]}" title="${EYE_NAMES[c]}"></button>`).join('')}</div>
       <div class="kicker mt12">SOURCILS</div>
       ${chips('brows', BROWS.map((b, i) => [b, `Style ${i + 1}`]))}
       <p class="tiny muted mt12">Les sourcils prennent la couleur des cheveux (onglet Cheveux).</p>`,

@@ -1,8 +1,8 @@
 // Kinetic — moteur d'avatar 3D (Three.js + données MakeHuman CC0)
 import * as THREE from 'three';
-import { RoomEnvironment } from '../vendor/RoomEnvironment.js';
+import { RoomEnvironment } from './RoomEnvironment.js';
 
-const ASSETS = new URL('../assets/', import.meta.url).href;
+const ASSETS = new URL('./', import.meta.url).href;
 const TYPES = { f32: Float32Array, u16: Uint16Array, u32: Uint32Array, i16: Int16Array, u8: Uint8Array };
 const view = (buf, d) => new TYPES[d.t](buf, d.o, d.n);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
@@ -135,7 +135,7 @@ async function loadProxy(core, key) {
 const texLoader = new THREE.TextureLoader();
 function tex(core, path, srgb = true) {
   if (!core.tex[path]) {
-    const t = texLoader.load(ASSETS + path);
+    const t = texLoader.load(ASSETS + path.replace(/^tex\//, ''));
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     t.anisotropy = 4;
     core.tex[path] = t;
@@ -472,7 +472,7 @@ export class Avatar {
       } else if (slot === 'lashes') {
         mat.color.set('#202020'); mat.transparent = true; mat.depthWrite = false; mat.side = THREE.DoubleSide;
       } else if (slot === 'eyes') {
-        mat.map = tex(core, `tex/eye-${L.eyes}.webp`); mat.roughness = 0.12; mat.color.set('#d9d2cd');
+        mat.map = tex(core, `eye-${L.eyes}.webp`); mat.roughness = 0.12; mat.color.set('#d9d2cd');
       } else if (slot === 'top') {
         mat.color.set(L.topColor); mat.roughness = 0.88; mat.side = THREE.DoubleSide;
         mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -6;
