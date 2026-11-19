@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0a0b0d">
 <meta name="description" content="Kinetic : ton avatar 3D, tes séances de muscu et de course, ta progression.">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -12,7 +12,7 @@
 <title>Kinetic</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -20,7 +20,21 @@
 <script type="importmap">{ "imports": { "three": "./three.module.min.js" } }</script>
 </head>
 <body>
-<main id="app" aria-live="polite"><div class="boot"><div class="brand big"><span class="slash"></span>KINETIC</div><div class="loader"></div></div></main>
+<div id="splash" aria-hidden="true">
+  <style>
+    #splash { position: fixed; inset: 0; z-index: 100; background: #0a0b0d; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: opacity .45s ease; }
+    #splash.out { opacity: 0; pointer-events: none; }
+    #splash .mark { width: 112px; height: 112px; animation: spl-in .7s cubic-bezier(.2,1.3,.4,1) both; }
+    #splash .word { position: absolute; bottom: calc(56px + env(safe-area-inset-bottom, 0px)); text-align: center; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif; font-weight: 800; letter-spacing: .32em; font-size: 22px; color: #f4f5f6; padding-left: .32em; animation: spl-fade .8s .25s both; }
+    #splash .word small { display: block; font-family: Inter, system-ui, sans-serif; font-weight: 600; letter-spacing: .14em; font-size: 10px; color: #7d8590; margin-bottom: 6px; }
+    @keyframes spl-in { from { transform: scale(.6) skewX(8deg); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes spl-fade { from { opacity: 0; transform: translateY(8px); } }
+  </style>
+  <svg class="mark" viewBox="0 0 512 512"><g transform="translate(256 256) skewX(-14) translate(-292 -256)"><polygon points="170,112 232,112 232,400 170,400" fill="#c8ff2e"/><polygon points="250,262 344,112 418,112 316,262 418,400 344,400" fill="#f4f5f6"/></g></svg>
+  <div class="word"><small>MUSCU · COURSE · AVATAR</small>KINETIC</div>
+</div>
+<div id="rotate" aria-live="polite"><svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="#c8ff2e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></svg><b>Tourne ton téléphone</b><span>Kinetic s’utilise en mode portrait.</span></div>
+<main id="app" aria-live="polite"></main>
 <noscript>Kinetic a besoin de JavaScript pour fonctionner.</noscript>
 <script type="module" src="app.js"></script>
 </body>

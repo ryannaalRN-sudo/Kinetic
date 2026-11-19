@@ -5,7 +5,7 @@
   --display: 'Barlow Condensed', 'Arial Narrow', system-ui, sans-serif; --body: Inter, system-ui, -apple-system, sans-serif;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { margin: 0; background: var(--bg); color: var(--tx); font-family: var(--body); font-size: 15px; line-height: 1.45; }
+html, body { touch-action: manipulation; -webkit-text-size-adjust: 100%; -webkit-user-select: none; user-select: none; margin: 0; background: var(--bg); color: var(--tx); font-family: var(--body); font-size: 15px; line-height: 1.45; }
 body { min-height: 100dvh; overscroll-behavior-y: none; }
 #app { max-width: 480px; margin: 0 auto; min-height: 100dvh; position: relative; }
 a { color: var(--volt); text-decoration: none; }
@@ -229,3 +229,49 @@ input[type=range] { width: 100%; height: 30px; accent-color: var(--volt); margin
 .dialog .dlg-t { font-size: 28px; }
 .dialog .celebrate-card p { color: var(--mu); font-weight: 500; font-size: 14px; }
 .dialog .field { text-align: left; }
+
+input, textarea { -webkit-user-select: text; user-select: text; }
+/* logo */
+.brand .logo { width: 30px; height: 30px; display: block; }
+.brand.big .logo { width: 44px; height: 44px; }
+/* sections repliables */
+details.more { margin: 6px 0 2px; }
+details.more summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; min-height: 36px; color: var(--mu); font-size: 13px; font-weight: 600; }
+details.more summary::-webkit-details-marker { display: none; }
+details.more summary::after { content: ''; width: 7px; height: 7px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg) translateY(-2px); transition: transform .2s; }
+details.more[open] summary::after { transform: rotate(-135deg) translateY(-1px); }
+details.more[open] summary { color: var(--volt); }
+details.more p { margin: 2px 0 8px; animation: pop .2s ease; }
+/* paysage bloqué */
+#rotate { display: none; }
+@media (orientation: landscape) and (max-height: 520px) {
+  #rotate { position: fixed; inset: 0; z-index: 200; background: #0a0b0d; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: #f4f5f6; font-family: Inter, system-ui, sans-serif; }
+  #rotate svg { animation: rot 1.6s ease-in-out infinite; }
+  #rotate span { color: #9aa1ab; font-size: 13px; }
+}
+@keyframes rot { 0%, 30% { transform: rotate(-90deg); } 60%, 100% { transform: rotate(0); } }
+/* questionnaire */
+.quiz { min-height: 100dvh; display: flex; flex-direction: column; padding-bottom: calc(18px + var(--safe-b)); }
+.quiz-top { display: flex; align-items: center; gap: 10px; padding: 14px 12px 0; }
+.quiz-top .progress { flex: 1; height: 6px; }
+.quiz-top .count { font-size: 12px; color: var(--mu); font-weight: 700; min-width: 34px; text-align: right; }
+.quiz-body { flex: 1; padding: 22px 16px 0; display: flex; flex-direction: column; animation: slidein .28s ease; }
+.quiz-body h1 { font-family: var(--display); font-weight: 800; font-size: 34px; line-height: 1; margin: 0 0 8px; }
+.quiz-body .sub { color: var(--mu); font-size: 14px; margin: 0 0 18px; }
+.opts { display: grid; gap: 10px; }
+.opts.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.opt { display: flex; align-items: center; gap: 12px; text-align: left; background: var(--s1); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; min-height: 60px; color: var(--tx); width: 100%; }
+.opt .oi { width: 38px; height: 38px; border-radius: 11px; background: var(--s2); display: flex; align-items: center; justify-content: center; color: var(--volt); flex-shrink: 0; }
+.opt b { display: block; font-size: 15px; } .opt small { display: block; color: var(--mu); font-size: 12.5px; margin-top: 2px; }
+.opt.on { border-color: var(--volt); background: #171c10; }
+.opt.on .oi { background: var(--volt); color: #0a0b0d; }
+.opt.center { justify-content: center; text-align: center; font-family: var(--display); font-weight: 800; font-size: 24px; }
+.quiz-foot { padding: 16px 16px 0; }
+.reco { border-color: var(--volt); }
+.intro-slot { height: 46vh; min-height: 300px; }
+@keyframes slidein { from { opacity: 0; transform: translateX(16px); } }
+
+.brandbar .brand { font-size: 24px; gap: 8px; }
+.brandbar .brand .logo { width: 26px; height: 26px; }
+.brandbar .icon-btn { width: 40px; height: 40px; }
+.brandbar .chip { padding: 6px 9px; }

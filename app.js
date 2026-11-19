@@ -2,6 +2,7 @@
 import { Avatar, SKIN_TONES, EYE_COLORS, DEFAULT_LOOK } from './avatar.js';
 import { EXERCISES, PROGRAMS, BADGES } from './data.js';
 import { store, levelInfo, epley, stats, nextSession, advanceProgram, checkBadges, idb, uid, weekKey } from './store.js';
+import { sfx, configureSound } from './sound.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -43,8 +44,11 @@ const I = {
   download: '<path d="M12 4v12M7 11l5 5 5-5M4 20h16"/>',
   info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
-  skip: '<path d="M6 5l9 7-9 7zM18 5v14"/>'
+  skip: '<path d="M6 5l9 7-9 7zM18 5v14"/>',
+  sound: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>',
+  mute: '<path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M17 9l5 6M22 9l-5 6"/>'
 };
+const LOGO = '<svg class="logo" viewBox="0 0 512 512" aria-hidden="true"><g transform="translate(256 256) skewX(-14) translate(-292 -256)"><polygon points="170,112 232,112 232,400 170,400" fill="#c8ff2e"/><polygon points="250,262 344,112 418,112 316,262 418,400 344,400" fill="#f4f5f6"/></g></svg>';
 const icon = (n, size = 22, extra = '') => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" ${extra}>${I[n] || ''}</svg>`;
 
 // ---------------------------------------------------------------- avatar partagé
@@ -54,6 +58,7 @@ avatarCanvas.className = 'avatar-canvas';
 function ensureAvatar() {
   if (!avatarReady) {
     avatar = new Avatar(avatarCanvas, { onTap: () => onAvatarTap() });
+    window.kineticAvatar = avatar;
     avatarReady = avatar.init().then(() => avatar.setLook(store.s.look)).then(() => avatar).catch((e) => { console.error(e); toast('Impossible de charger l’avatar 3D sur cet appareil'); });
   }
   return avatarReady;
@@ -80,6 +85,8 @@ function onAvatarTap() {
   ];
   const [pose, text] = lines[tapStep++ % lines.length];
   avatar.play(pose, 1900);
+  sfx({ flex: 'flex', jump: 'jump', wave: 'wave', cheer: 'success', squat: 'whoosh' }[pose] || 'pop');
+  setTimeout(() => sfx('pop'), 120);
   if (navigator.vibrate) navigator.vibrate(15);
   const b = $('#bubble');
   if (b) { b.textContent = text; b.classList.add('show'); clearTimeout(bubbleTimer); bubbleTimer = setTimeout(() => b.classList.remove('show'), 1900); }
@@ -91,6 +98,7 @@ function toast(msg, ms = 2400) {
   t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove('show'), ms);
 }
 function celebrate(title, lines = []) {
+  sfx(lines.some((l) => /Badge|record|Niveau/i.test(l)) ? 'levelup' : 'success');
   const o = document.createElement('div');
   o.className = 'celebrate';
   o.innerHTML = `<div class="celebrate-card"><div class="kicker">BRAVO</div><h2>${esc(title)}</h2>${lines.map((l) => `<p>${esc(l)}</p>`).join('')}<button class="btn primary" data-close>Continuer</button></div>`;
@@ -120,6 +128,17 @@ const nav = (active) => `
 const topbar = (title, back = '#home', right = '') => `
 <header class="topbar"><a class="icon-btn" href="${back}" aria-label="Retour">${icon('back')}</a><h1 class="title">${title}</h1><div class="topbar-right">${right}</div></header>`;
 
+document.addEventListener('click', (e) => {
+  const el = e.target.closest('button, a, label.btn, .sw, .chip-btn, summary');
+  if (!el) return;
+  const k = el.dataset.sfx || (el.matches('.sw, .chip-btn, .seg button, .chips-row button, .opt') ? 'select' : 'tap');
+  if (k !== 'none') sfx(k);
+}, true);
+// pas de zoom (pincement, double tap) : l'appli se comporte comme une appli native
+['gesturestart', 'gesturechange'].forEach((ev) => document.addEventListener(ev, (e) => e.preventDefault()));
+let lastTouch = 0;
+document.addEventListener('touchend', (e) => { const n = Date.now(); if (n - lastTouch < 300 && !e.target.closest('input, textarea')) e.preventDefault(); lastTouch = n; }, { passive: false });
+
 // ---------------------------------------------------------------- routeur
 const routes = {};
 let cleanup = null;
@@ -129,8 +148,8 @@ function render() {
   const h = location.hash.replace(/^#\/?/, '') || 'home';
   const cut = h.indexOf('-');
   const name = cut < 0 ? h : h.slice(0, cut), arg = cut < 0 ? undefined : h.slice(cut + 1);
-  if (!store.s.onboarded && name !== 'welcome' && name !== 'avatar') { location.hash = '#welcome'; return; }
-  if (store.s.onboarded && name === 'welcome') { location.hash = '#home'; return; }
+  if (!store.s.onboarded && name !== 'quiz' && name !== 'avatar') { location.hash = '#quiz'; return; }
+  if (name === 'welcome') { location.hash = store.s.onboarded ? '#home' : '#quiz'; return; }
   const view = routes[name] || routes.home;
   window.scrollTo(0, 0);
   cleanup = view(arg) || null;
@@ -144,9 +163,10 @@ routes.home = () => {
   app.innerHTML = `
   <div class="view home">
     <header class="brandbar">
-      <div class="brand"><span class="slash"></span>KINETIC</div>
+      <div class="brand">${LOGO}<span>KINETIC</span></div>
       <div class="row gap8">
         <span class="chip">${icon('flame', 16, 'class="volt"')}<b>${st.streak}</b> sem.</span>
+        <button class="icon-btn" id="mute" data-sfx="none" aria-label="${s.profile.sound?.on === false ? 'Activer' : 'Couper'} les sons">${icon(s.profile.sound?.on === false ? 'mute' : 'sound', 20)}</button>
         <a class="icon-btn" href="#reglages" aria-label="Réglages">${icon('gear', 20)}</a>
       </div>
     </header>
@@ -182,44 +202,120 @@ routes.home = () => {
     </section>
   </div>${nav('home')}`;
   mountAvatar($('#slot'));
+  $('#mute').addEventListener('click', () => {
+    const on = s.profile.sound?.on === false;
+    s.profile.sound = { on, vol: s.profile.sound?.vol ?? 0.7 }; configureSound(s.profile.sound); store.save();
+    $('#mute').innerHTML = icon(on ? 'sound' : 'mute', 20); $('#mute').setAttribute('aria-label', (on ? 'Couper' : 'Activer') + ' les sons');
+    if (on) sfx('check'); toast(on ? 'Sons activés' : 'Sons coupés');
+  });
 };
 
 // ---------------------------------------------------------------- accueil / bienvenue
-routes.welcome = () => {
-  app.innerHTML = `
-  <div class="view welcome">
-    <div class="brand big"><span class="slash"></span>KINETIC</div>
-    <div class="avatar-slot welcome-slot" id="slot"></div>
-    <div class="pad">
-      <h1 class="h-display">TON DOUBLE SPORTIF</h1>
-      <p class="muted">Crée un avatar 3D qui te ressemble, suis tes séances de muscu et de course, et regarde-le évoluer avec toi.</p>
-      <label class="field"><span>Ton prénom</span><input id="w-name" autocomplete="given-name" placeholder="Prénom" value="${esc(store.s.profile.name)}"></label>
-      <div class="field"><span>Silhouette de départ</span>
-        <div class="seg" id="w-sex"><button data-v="1" class="on">Masculine</button><button data-v="0">Féminine</button></div></div>
-      <div class="grid2">
-        <label class="field"><span>Taille (cm)</span><input id="w-h" type="number" inputmode="numeric" value="${store.s.look.height}"></label>
-        <label class="field"><span>Poids (kg)</span><input id="w-w" type="number" inputmode="decimal" value="${store.s.look.weight}"></label>
-      </div>
-      <button class="btn primary big" id="w-go">CRÉER MON AVATAR</button>
-      <p class="muted tiny center">${icon('lock', 12)} Tes données et tes photos restent sur ton téléphone.</p>
-    </div>
-  </div>`;
-  mountAvatar($('#slot'));
-  let sex = 1;
-  $('#w-sex').addEventListener('click', (e) => {
-    const b = e.target.closest('button'); if (!b) return;
-    sex = +b.dataset.v; [...$('#w-sex').children].forEach((x) => x.classList.toggle('on', x === b));
-    const look = Object.assign({}, store.s.look, sex ? { sex: 1, hair: 'h-short02', top: 'g-tee', bottom: 'c-shorts', brows: 'brow02' } : { sex: 0, hair: 'h-ponytail', top: 'g-crop', bottom: 'g-leggings', brows: 'brow06', height: 166, weight: 60 });
-    if (!sex) { $('#w-h').value = 166; $('#w-w').value = 60; } else { $('#w-h').value = 180; $('#w-w').value = 78; }
-    store.s.look = look; avatar?.setLook(look);
-  });
-  $('#w-go').addEventListener('click', () => {
-    store.s.profile.name = $('#w-name').value.trim().slice(0, 24);
-    store.s.look.height = Math.min(220, Math.max(130, +$('#w-h').value || 175));
-    store.s.look.weight = Math.min(200, Math.max(35, +$('#w-w').value || 70));
-    store.save();
-    location.hash = '#avatar-first';
-  });
+const QUIZ_ICONS = { muscle: 'lift', lose: 'flame', endurance: 'run', fitness: 'spark', race: 'flag', hybrid: 'infinity', muscu: 'lift', course: 'run', velo: 'road', natation: 'stack', collectif: 'trophy', combat: 'bolt', aucun: 'user', gym: 'lift', home: 'weight', body: 'user', haut: 'lift', abdos: 'stack', jambes: 'run', fessiers: 'spark', cardio: 'flame', souplesse: 'infinity' };
+const QUIZ = [
+  { id: 'intro' },
+  { id: 'name', title: 'Comment tu t’appelles ?', sub: 'Ton avatar t’appellera par ton prénom.' },
+  { id: 'goal', title: 'Ton objectif principal ?', sub: 'On adapte ton programme en fonction.', single: true, opts: [['muscle', 'Prendre du muscle', 'Force et volume'], ['lose', 'Perdre du gras', 'S’affiner, se sentir mieux'], ['endurance', 'Gagner en endurance', 'Tenir plus longtemps'], ['fitness', 'Me remettre en forme', 'Reprendre en douceur'], ['race', 'Préparer une course', '5 km, 10 km et plus'], ['hybrid', 'Devenir un athlète hybride', 'Fort et endurant à la fois']] },
+  { id: 'sports', title: 'Que pratiques-tu déjà ?', sub: 'Plusieurs choix possibles.', opts: [['muscu', 'Musculation'], ['course', 'Course à pied'], ['velo', 'Vélo'], ['natation', 'Natation'], ['collectif', 'Sports collectifs'], ['combat', 'Sports de combat'], ['aucun', 'Rien pour l’instant']] },
+  { id: 'level', title: 'Ton niveau ?', sub: 'Sois honnête, personne ne regarde.', single: true, opts: [['debutant', 'Débutant', 'Moins de 6 mois de pratique régulière'], ['inter', 'Intermédiaire', 'Entre 6 mois et 2 ans'], ['confirme', 'Confirmé', 'Plus de 2 ans, à l’aise avec les mouvements']] },
+  { id: 'freq', title: 'Combien de séances par semaine ?', sub: 'Choisis un rythme tenable sur la durée.' },
+  { id: 'equip', title: 'Où t’entraînes-tu ?', single: true, opts: [['gym', 'En salle', 'Barres, machines, haltères'], ['home', 'À la maison avec haltères', 'Un peu de matériel'], ['body', 'Au poids du corps', 'Sans matériel, partout']] },
+  { id: 'focus', title: 'Des priorités ?', sub: 'Facultatif, plusieurs choix possibles.', opts: [['haut', 'Haut du corps'], ['abdos', 'Abdos et gainage'], ['jambes', 'Jambes'], ['fessiers', 'Fessiers'], ['cardio', 'Cardio'], ['souplesse', 'Mobilité']] },
+  { id: 'body', title: 'Ta silhouette de départ', sub: 'Pour générer ton avatar. Tu pourras tout affiner ensuite.' },
+  { id: 'reco' }
+];
+function recommend(q) {
+  const lvl = q.level || 'debutant', g = q.goal, runs = (q.sports || []).includes('course'), lifts = (q.sports || []).includes('muscu');
+  if (q.equip === 'body' && !['race', 'endurance'].includes(g)) return ['bodyweight', 'Tu t’entraînes sans matériel : un circuit complet au poids du corps.'];
+  if (g === 'race' || g === 'endurance') {
+    if (!runs || lvl === 'debutant') return ['c25k', 'Tu veux de l’endurance : on construit ta base de course en alternant marche et course.'];
+    return ['tenk', 'Tu cours déjà : endurance, fractionné et sortie longue pour progresser.'];
+  }
+  if (g === 'hybrid') return lvl === 'confirme' && (q.freq || 3) >= 5 ? ['hybrid', 'Confirmé et disponible : force en salle et moteur cardio.'] : ['ppl', 'Muscu et course dans la même semaine, sans y passer ta vie.'];
+  if (g === 'muscle') return lvl === 'debutant' && !lifts ? ['fullbody', 'Pour débuter, les mouvements de base 3 fois par semaine donnent les meilleurs résultats.'] : ['ppl', 'Tu as déjà des bases : on répartit le travail par groupes musculaires.'];
+  if (lvl === 'debutant') return ['fullbody', 'Un programme simple et complet pour reprendre en douceur.'];
+  return ['ppl', 'Un bon équilibre entre force, volume et cardio.'];
+}
+routes.quiz = () => {
+  const s = store.s, redo = s.onboarded;
+  const q = Object.assign({ name: s.profile.name || '', sports: [], focus: [], freq: s.profile.goal || 3, dur: 60, sex: s.look.sex >= 0.5 ? 1 : 0, height: s.look.height, weight: s.look.weight }, s.profile.quiz || {});
+  let i = redo ? 1 : 0;
+  const total = QUIZ.length - 1;
+  const draw = () => {
+    const st = QUIZ[i];
+    const top = i > 0 ? `<div class="quiz-top"><button class="icon-btn" id="q-back" aria-label="Retour" style="border:0;background:transparent">${icon('back')}</button><div class="progress"><i style="width:${Math.round((i / total) * 100)}%"></i></div><span class="count">${Math.min(i, total)}/${total}</span></div>` : '';
+    let body = '', canNext = true;
+    if (st.id === 'intro') {
+      body = `<div class="brand big" style="padding-top:18px">${LOGO}<span>KINETIC</span></div><div class="avatar-slot intro-slot" id="slot"></div>
+        <h1>TON DOUBLE SPORTIF</h1><p class="sub">Quelques questions pour créer ton programme et ton avatar 3D.</p>`;
+    } else if (st.id === 'name') {
+      body = `<h1>${st.title.toUpperCase()}</h1><p class="sub">${st.sub}</p><label class="field"><span>Prénom</span><input id="q-name" autocomplete="given-name" placeholder="Prénom" maxlength="24" value="${esc(q.name)}"></label>`;
+    } else if (st.id === 'freq') {
+      body = `<h1>${st.title.toUpperCase()}</h1><p class="sub">${st.sub}</p>
+        <div class="opts two" id="q-freq">${[2, 3, 4, 5, 6].map((n) => `<button class="opt center ${q.freq === n ? 'on' : ''}" data-v="${n}">${n}</button>`).join('')}</div>
+        <div class="kicker mt20">DURÉE D’UNE SÉANCE</div>
+        <div class="opts two mt8" id="q-dur">${[30, 45, 60, 90].map((n) => `<button class="opt center ${q.dur === n ? 'on' : ''}" data-v="${n}">${n} min</button>`).join('')}</div>`;
+    } else if (st.id === 'body') {
+      body = `<h1>${st.title.toUpperCase()}</h1><p class="sub">${st.sub}</p>
+        <div class="seg" id="q-sex"><button data-v="1" class="${q.sex ? 'on' : ''}">Masculine</button><button data-v="0" class="${q.sex ? '' : 'on'}">Féminine</button></div>
+        <div class="grid2"><label class="field"><span>Taille (cm)</span><input id="q-h" type="number" inputmode="numeric" value="${q.height}"></label>
+        <label class="field"><span>Poids (kg)</span><input id="q-w" type="number" inputmode="decimal" value="${q.weight}"></label></div>
+        <p class="tiny muted mt12">${icon('lock', 12)} Tes données restent sur ton téléphone.</p>`;
+    } else if (st.id === 'reco') {
+      const [pid, why] = q.program ? [q.program, recommend(q)[1]] : recommend(q);
+      q.program = pid;
+      const p = PROGRAMS[pid];
+      body = `<h1>${q.name ? esc(q.name).toUpperCase() + ', ' : ''}VOICI TON PLAN</h1><p class="sub">${esc(why)}</p>
+        <div class="card reco"><span class="kicker">PROGRAMME CONSEILLÉ</span><div class="h-card">${esc(p.name).toUpperCase()}</div><div class="muted small">${esc(p.tag)}</div>
+        <div class="grid2 mt12"><div class="stat"><span>OBJECTIF</span><b class="small-b">${q.freq} séances / sem.</b></div><div class="stat"><span>NIVEAU</span><b class="small-b">${esc(p.level)}</b></div></div></div>
+        <details class="more mt12"><summary>Choisir un autre programme</summary><div class="opts" id="q-prog">${Object.entries(PROGRAMS).map(([id, x]) => `<button class="opt ${id === pid ? 'on' : ''}" data-v="${id}"><span class="grow"><b>${esc(x.name)}</b><small>${esc(x.tag)}</small></span></button>`).join('')}</div></details>`;
+    } else {
+      const multi = !st.single, val = q[st.id];
+      canNext = multi ? (st.id === 'focus' || (val && val.length)) : !!val;
+      body = `<h1>${st.title.toUpperCase()}</h1>${st.sub ? `<p class="sub">${st.sub}</p>` : ''}
+        <div class="opts ${!st.opts[0][2] && st.opts.length > 4 ? 'two' : ''}" id="q-opts">${st.opts.map(([v, l, d]) => `<button class="opt ${(multi ? (val || []).includes(v) : val === v) ? 'on' : ''}" data-v="${v}"><span class="oi">${icon(QUIZ_ICONS[v] || 'spark', 20)}</span><span class="grow"><b>${l}</b>${d ? `<small>${d}</small>` : ''}</span></button>`).join('')}</div>`;
+    }
+    const nextLabel = st.id === 'intro' ? 'C’EST PARTI' : st.id === 'reco' ? (redo ? 'APPLIQUER' : 'CRÉER MON AVATAR') : 'CONTINUER';
+    app.innerHTML = `<div class="view quiz">${top}<div class="quiz-body">${body}</div><div class="quiz-foot"><button class="btn primary big" id="q-next" ${canNext ? '' : 'disabled style="opacity:.4"'}>${nextLabel}</button>${st.id === 'focus' ? '<button class="btn text sm mt8" id="q-skip" style="width:100%">Passer</button>' : ''}</div></div>`;
+    if (st.id === 'intro') mountAvatar($('#slot'));
+    bind(st);
+  };
+  const bind = (st) => {
+    $('#q-back')?.addEventListener('click', () => { i = Math.max(redo ? 1 : 0, i - 1); draw(); });
+    $('#q-skip')?.addEventListener('click', () => { i++; draw(); });
+    const og = $('#q-opts');
+    if (og) og.addEventListener('click', (e) => {
+      const b = e.target.closest('.opt'); if (!b) return;
+      const v = b.dataset.v;
+      if (st.single) { q[st.id] = v; draw(); setTimeout(() => { if (QUIZ[i] === st) { i++; draw(); } }, 260); return; }
+      let arr = q[st.id] || [];
+      if (v === 'aucun') arr = arr.includes('aucun') ? [] : ['aucun'];
+      else arr = arr.includes(v) ? arr.filter((x) => x !== v) : arr.filter((x) => x !== 'aucun').concat(v);
+      q[st.id] = arr; draw();
+    });
+    for (const [id, key] of [['q-freq', 'freq'], ['q-dur', 'dur']]) $('#' + id)?.addEventListener('click', (e) => { const b = e.target.closest('.opt'); if (b) { q[key] = +b.dataset.v; draw(); } });
+    $('#q-prog')?.addEventListener('click', (e) => { const b = e.target.closest('.opt'); if (b) { q.program = b.dataset.v; draw(); $('#q-prog')?.closest('details')?.setAttribute('open', ''); } });
+    $('#q-sex')?.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      q.sex = +b.dataset.v; q.height = q.sex ? 180 : 166; q.weight = q.sex ? 78 : 60; draw();
+    });
+    $('#q-next').addEventListener('click', () => {
+      if (st.id === 'name') q.name = $('#q-name').value.trim().slice(0, 24);
+      if (st.id === 'body') { q.height = Math.min(220, Math.max(130, +$('#q-h').value || 175)); q.weight = Math.min(200, Math.max(35, +$('#q-w').value || 70)); }
+      if (st.id === 'goal' || st.id === 'level' || st.id === 'sports' || st.id === 'equip') delete q.program;
+      if (st.id !== 'reco') { i++; draw(); return; }
+      // fin : profil, programme et silhouette de départ
+      s.profile.name = q.name; s.profile.goal = q.freq; s.profile.quiz = q;
+      if (s.program.id !== q.program) s.program = { id: q.program, index: 0, started: Date.now() };
+      const lean = q.goal === 'muscle' || q.goal === 'hybrid' ? 0.62 : q.level === 'confirme' ? 0.6 : 0.5;
+      const base = q.sex ? { sex: 1, hair: s.look.sex >= 0.5 ? s.look.hair : 'h-short02', top: 'g-tee', bottom: 'c-shorts', brows: 'brow02' } : { sex: 0, hair: s.look.sex < 0.5 ? s.look.hair : 'h-ponytail', top: 'g-crop', bottom: 'g-leggings', brows: 'brow06' };
+      s.look = Object.assign({}, s.look, base, { height: q.height, weight: q.weight }, redo ? {} : { muscle: lean });
+      store.save();
+      avatar?.setLook(s.look);
+      if (redo) { toast('Profil mis à jour'); location.hash = '#home'; } else location.hash = '#avatar-first';
+    });
+  };
+  draw();
 };
 
 // ---------------------------------------------------------------- éditeur d'avatar
@@ -243,7 +339,7 @@ routes.avatar = (arg) => {
   let tab = 'corps', mode = 'split', photoURL = null, hideBmi = hidden();
   app.innerHTML = `
   <div class="view editor">
-    ${topbar('TON AVATAR', first ? '#welcome' : '#home', `<button class="btn primary sm" id="save">Enregistrer</button>`)}
+    ${topbar('TON AVATAR', first ? '#quiz' : '#home', `<button class="btn primary sm" id="save">Enregistrer</button>`)}
     <div class="pad-x"><div class="seg" id="mode"><button data-m="split" class="on">Avec ma photo</button><button data-m="overlay">Superposé</button><button data-m="solo">Avatar seul</button></div></div>
     <section class="editor-stage mode-split" id="stage">
       <div class="photo-panel" id="photo">
@@ -279,7 +375,7 @@ routes.avatar = (arg) => {
         <div class="stat"><span>POIDS</span><b id="o-w">${hideBmi ? '•••' : look.weight + ' kg'}</b></div>
         <button class="stat" id="bmi" aria-label="Afficher ou masquer l’IMC"><span>IMC ${icon('eye', 12)}</span><b id="o-b">${hideBmi ? 'masqué' : fmt(bmi(), 1)}</b></button>
       </div>
-      <p class="tiny muted">L’IMC sert seulement de point de départ à la silhouette : il ne distingue pas le muscle de la graisse.</p>
+      <details class="more"><summary>À quoi sert l’IMC ?</summary><p class="tiny muted">Il sert seulement de point de départ à la silhouette : il ne distingue pas le muscle de la graisse. Ajuste avec la musculature et les zones.</p></details>
       <div class="kicker mt12">BASE</div>
       ${slider('sex', 'Silhouette · féminine ↔ masculine', 0, 1, 0.01, look.sex, 'p')}
       ${slider('height', 'Taille', 140, 210, 1, look.height, ' cm')}
@@ -338,8 +434,8 @@ routes.avatar = (arg) => {
     if (first) { store.s.onboarded = true; }
     store.save();
     toast('Avatar enregistré');
-    location.hash = first ? '#train' : '#home';
-    if (first) setTimeout(() => toast('Choisis ton programme pour commencer'), 300);
+    location.hash = '#home';
+    if (first) setTimeout(() => { avatar?.play('wave', 2200); celebrate('C’EST PARTI', [`Programme : ${PROGRAMS[store.s.program.id].name}`, 'Touche ton avatar pour le faire réagir.']); }, 400);
   });
   return () => { if (photoURL) URL.revokeObjectURL(photoURL); if (avatar && JSON.stringify(avatar.look) !== JSON.stringify(store.s.look)) avatar.setLook(store.s.look); };
 };
@@ -356,7 +452,7 @@ routes.train = () => {
         <span class="kicker">PROGRAMME ACTIF</span>
         <div class="h-card">${esc(cur.name).toUpperCase()}</div>
         <div class="muted small">${esc(cur.tag)} · ${esc(cur.level)}</div>
-        <p class="small">${esc(cur.desc)}</p>
+        <details class="more"><summary>À propos du programme</summary><p class="small">${esc(cur.desc)}</p></details>
         <div class="list">${cur.sessions.slice(0, cur.weekly ? 8 : 10).map((x, i) => `
           <a class="list-item ${i === next.index ? 'next' : ''}" href="${x.type === 'run' ? '#runlive-' + i : '#session-' + i}">
             <span class="dot">${icon(x.type === 'run' ? 'run' : 'lift', 16)}</span>
@@ -425,14 +521,14 @@ routes.session = (arg) => {
       return `<article class="excard">
         <h2 class="h-ex">${esc(E.name).toUpperCase()}</h2>
         <div class="chips small">${E.muscles.map((m) => `<span class="chip">${esc(m)}</span>`).join('')}</div>
-        <p class="muted small">${esc(E.cue)}</p>
+        <details class="more"><summary>Conseils d’exécution</summary><p class="muted small">${esc(E.cue)}</p></details>
         <div class="sets">
           <div class="sets-h"><span>SÉRIE</span><span>PRÉCÉDENT</span><span>${charge ? 'KG' : ''}</span><span>${time ? 'SEC' : 'REPS'}</span><span></span></div>
           ${e.sets.map((x, si) => `<div class="set ${si === cur ? 'cur' : ''} ${x.done ? 'done' : ''}">
             <b>${si + 1}</b><span class="muted">${esc(x.prev)}</span>
             ${charge ? `<input type="number" inputmode="decimal" step="0.5" value="${x.kg}" data-e="${ei}" data-s="${si}" data-f="kg" aria-label="Charge série ${si + 1}">` : '<span></span>'}
             <input type="number" inputmode="numeric" value="${x.reps}" data-e="${ei}" data-s="${si}" data-f="reps" aria-label="${time ? 'Secondes' : 'Répétitions'} série ${si + 1}">
-            <button class="check" data-e="${ei}" data-s="${si}" aria-label="${x.done ? 'Annuler' : 'Valider'} la série ${si + 1}">${icon('check', 20)}</button>
+            <button class="check" data-sfx="none" data-e="${ei}" data-s="${si}" aria-label="${x.done ? 'Annuler' : 'Valider'} la série ${si + 1}">${icon('check', 20)}</button>
           </div>`).join('')}
         </div>
         <button class="btn text sm" data-add="${ei}">+ Ajouter une série</button>
@@ -449,7 +545,7 @@ routes.session = (arg) => {
     if (add) { const e = draft.ex[+add.dataset.add]; const l = e.sets[e.sets.length - 1]; e.sets.push({ kg: l.kg, reps: l.reps, prev: '—', done: false }); save(); drawEx(); return; }
     const b = ev.target.closest('.check'); if (!b) return;
     const e = draft.ex[+b.dataset.e], x = e.sets[+b.dataset.s];
-    x.done = !x.done; save(); drawEx();
+    x.done = !x.done; save(); drawEx(); sfx(x.done ? 'check' : 'uncheck');
     if (x.done) { restMax = e.rest; rest = e.rest; $('#restbar').hidden = false; if (navigator.vibrate) navigator.vibrate(20); }
   });
   $('#restbar').addEventListener('click', (ev) => { const b = ev.target.closest('[data-rest]'); if (!b) return; const v = +b.dataset.rest; rest = v === 0 ? 0 : Math.max(0, rest + v); if (v > 0) restMax = Math.max(restMax, rest); });
@@ -459,7 +555,8 @@ routes.session = (arg) => {
       rest -= 1;
       $('#restt').textContent = mmss(rest);
       $('#ringv').style.strokeDashoffset = String(276.5 * (1 - rest / restMax));
-      if (rest === 0) { $('#restbar').hidden = true; if (navigator.vibrate) navigator.vibrate([120, 80, 120]); toast('Repos terminé : série suivante !'); }
+      if (rest > 0 && rest <= 3) sfx('tick');
+      if (rest === 0) { sfx('end'); $('#restbar').hidden = true; if (navigator.vibrate) navigator.vibrate([120, 80, 120]); toast('Repos terminé : série suivante !'); }
     }
   }, 1000);
   $('#finish').addEventListener('click', () => {
@@ -541,7 +638,7 @@ routes.run = () => {
         <div class="row between mt8"><span class="muted small">Allure : <b id="r-pace">—</b></span>
           <label class="btn ghost sm">${icon('upload', 16)} Importer un GPX<input type="file" accept=".gpx,application/gpx+xml" id="gpx" hidden></label></div>
         <button class="btn primary mt12" id="r-save">Enregistrer</button>
-        <p class="tiny muted mt8">Le suivi GPS en direct est peu fiable dans une appli web quand l’écran est verrouillé : exporte plutôt ta course en GPX depuis ta montre ou Strava.</p>
+        <details class="more mt8"><summary>Pourquoi pas de GPS en direct ?</summary><p class="tiny muted">Une appli web perd le GPS quand l’écran se verrouille. Exporte plutôt ta course en GPX depuis ta montre ou Strava.</p></details>
       </div>
       <div class="grid3 mt12">
         <div class="stat"><span>CETTE SEMAINE</span><b>${hidden() ? '•••' : fmt(kmW[7], 1) + ' km'}</b></div>
@@ -590,9 +687,9 @@ routes.runlive = (arg) => {
       <div class="big-time" id="time">${free ? '00:00' : mmss(left)}</div>
       <div class="muted" id="nextl">${free ? 'Chrono libre' : segs[1] ? 'Ensuite : ' + (LABEL[segs[1][0]] || '') + ' · ' + mmss(segs[1][1]) : 'Dernier bloc'}</div>
       ${free ? '' : `<div class="progress mt20"><i id="tp"></i></div><div class="row between tiny muted mt8"><span id="el">00:00</span><span>${mmss(total)}</span></div>`}
-      <p class="small muted mt20">${esc(sess.note || '')}</p>
+      ${sess.note ? `<details class="more mt20"><summary>Conseil</summary><p class="small muted">${esc(sess.note)}</p></details>` : ''}
       <div class="row center gap12 mt20">
-        <button class="btn primary round" id="pp" aria-label="Démarrer">${icon('play', 28)}</button>
+        <button class="btn primary round" id="pp" data-sfx="none" aria-label="Démarrer">${icon('play', 28)}</button>
         ${free ? '' : `<button class="btn ghost round" id="skip" aria-label="Bloc suivant">${icon('skip', 24)}</button>`}
       </div>
       <button class="btn outline mt20" id="end">Terminer et enregistrer</button>
@@ -602,6 +699,7 @@ routes.runlive = (arg) => {
     elapsed++;
     if (free) { $('#time').textContent = mmss(elapsed); return; }
     left--;
+    if (left > 0 && left <= 3) sfx('tick');
     if (left <= 0) next();
     $('#time').textContent = mmss(Math.max(0, left));
     $('#el').textContent = mmss(elapsed);
@@ -614,10 +712,11 @@ routes.runlive = (arg) => {
     $('#lab').textContent = LABEL[segs[i][0]] || '';
     $('#lab').className = 'seg-label ' + (['course', 'rapide'].includes(segs[i][0]) ? 'hot' : '');
     $('#nextl').textContent = segs[i + 1] ? 'Ensuite : ' + (LABEL[segs[i + 1][0]] || '') + ' · ' + mmss(segs[i + 1][1]) : 'Dernier bloc';
+    sfx('end');
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
   };
-  const start = () => { running = true; timer = setInterval(tick, 1000); $('#pp').innerHTML = icon('pause', 28); $('#pp').setAttribute('aria-label', 'Pause'); };
-  const stop = () => { running = false; clearInterval(timer); $('#pp').innerHTML = icon('play', 28); $('#pp').setAttribute('aria-label', 'Reprendre'); };
+  const start = () => { sfx('start'); running = true; timer = setInterval(tick, 1000); $('#pp').innerHTML = icon('pause', 28); $('#pp').setAttribute('aria-label', 'Pause'); };
+  const stop = () => { if (running) sfx('pause'); running = false; clearInterval(timer); $('#pp').innerHTML = icon('play', 28); $('#pp').setAttribute('aria-label', 'Reprendre'); };
   const finish = async () => {
     const km = await ask({ title: 'Distance parcourue', text: `Durée : ${hms(elapsed)}`, input: { label: 'Distance (km)', type: 'text', mode: 'decimal', placeholder: '5,0' }, ok: 'Enregistrer' });
     const v = parseFloat(String(km || '').replace(',', '.'));
@@ -719,7 +818,7 @@ routes.progress = (arg) => {
       body.innerHTML = `
         <div class="kicker">RECORDS DE FORCE (1RM ESTIMÉ)</div>
         ${recs.length ? `<div class="list">${recs.map(([id, r]) => `<div class="list-item"><span class="dot">${icon('trophy', 16)}</span><span class="grow"><b>${esc(EXERCISES[id]?.name || id)}</b><small>${hidden() ? '' : fmt(r.kg, 1) + ' kg × ' + r.reps + ' · '}${dateFr(r.date)}</small></span><b class="volt">${hidden() ? '•••' : fmt(r.e1rm, 0) + ' kg'}</b></div>`).join('')}</div>` : '<p class="muted small">Valide des séries avec charge pour établir tes records.</p>'}
-        <p class="tiny muted">1RM estimé avec la formule d’Epley : une estimation, pas un test maximal.</p>
+        <details class="more"><summary>Comment est calculé le 1RM ?</summary><p class="tiny muted">Avec la formule d’Epley à partir de ta meilleure série : c’est une estimation, pas un test maximal.</p></details>
         <div class="kicker mt20">COURSE</div>
         <div class="list"><div class="list-item"><span class="dot">${icon('road', 16)}</span><span class="grow"><b>Plus longue course</b><small>${runsBest ? dateFr(runsBest.date) : 'Aucune course'}</small></span><b class="volt">${runsBest ? (hidden() ? '•••' : fmt(runsBest.km, 2) + ' km') : '—'}</b></div></div>
         <div class="kicker mt20">BADGES · ${Object.keys(s.badges).length}/${BADGES.length}</div>
@@ -792,22 +891,33 @@ routes.reglages = () => {
       <label class="field"><span>Prénom</span><input id="st-name" value="${esc(s.profile.name)}" maxlength="24"></label>
       <label class="field"><span>Objectif de séances par semaine</span><input id="st-goal" type="number" min="1" max="14" value="${s.profile.goal}"></label>
       <label class="check-row"><input type="checkbox" id="st-hide" ${s.profile.hideNumbers ? 'checked' : ''}> Masquer les chiffres (poids, IMC, volumes)</label>
+      <div class="kicker mt20">SONS</div>
+      <label class="check-row"><input type="checkbox" id="st-snd" ${s.profile.sound?.on !== false ? 'checked' : ''}> Bruitages activés</label>
+      <label class="slider"><span class="row between"><span>Volume</span><output id="st-volo">${Math.round((s.profile.sound?.vol ?? 0.7) * 100)} %</output></span><input type="range" min="0" max="1" step="0.05" id="st-vol" value="${s.profile.sound?.vol ?? 0.7}"></label>
+      <p class="tiny muted">Sur iPhone, le bouton silencieux coupe aussi les sons de l’appli.</p>
       <button class="btn primary mt12" id="st-save">Enregistrer</button>
+      <a class="btn ghost mt12" href="#quiz">Refaire le questionnaire</a>
       <div class="kicker mt20">MES DONNÉES</div>
-      <p class="small muted">Tout est stocké sur ce téléphone, sans compte ni serveur. Pense à exporter une sauvegarde de temps en temps (les photos ne sont pas incluses).</p>
+      <p class="small muted">Tout reste sur ce téléphone, sans compte. Exporte une sauvegarde de temps en temps.</p>
       <div class="grid2"><button class="btn ghost" id="st-exp">${icon('download', 16)} Exporter</button><label class="btn ghost">${icon('upload', 16)} Importer<input type="file" accept="application/json" id="st-imp" hidden></label></div>
       <button class="btn danger mt12" id="st-reset">${icon('trash', 16)} Tout effacer</button>
-      <div class="kicker mt20">À PROPOS</div>
-      <p class="small muted">Kinetic · application gratuite. Avatar 3D construit avec les ressources CC0 de la communauté MakeHuman et Three.js (licence MIT).</p>
-      <p class="small muted">Les programmes sont des modèles généraux : adapte les charges à ton niveau et demande conseil à un professionnel de santé en cas de douleur ou de problème médical.</p>
+      <details class="more mt20"><summary>À propos de Kinetic</summary>
+      <p class="small muted">Application gratuite. Avatar 3D construit avec les ressources CC0 de la communauté MakeHuman et Three.js (licence MIT).</p>
+      <p class="small muted">Les programmes sont des modèles généraux : adapte les charges à ton niveau et demande conseil à un professionnel de santé en cas de douleur ou de problème médical.</p></details>
     </section>
   </div>`;
   $('#st-save').addEventListener('click', () => {
     s.profile.name = $('#st-name').value.trim().slice(0, 24);
     s.profile.goal = Math.max(1, Math.min(14, +$('#st-goal').value || 3));
     s.profile.hideNumbers = $('#st-hide').checked;
+    s.profile.sound = { on: $('#st-snd').checked, vol: +$('#st-vol').value };
+    configureSound(s.profile.sound);
     store.save(); toast('Réglages enregistrés');
   });
+  const liveSound = () => { const v = { on: $('#st-snd').checked, vol: +$('#st-vol').value }; $('#st-volo').textContent = Math.round(v.vol * 100) + ' %'; configureSound(v); s.profile.sound = v; store.save(); };
+  $('#st-vol').addEventListener('input', liveSound);
+  $('#st-vol').addEventListener('change', () => sfx('check'));
+  $('#st-snd').addEventListener('change', () => { liveSound(); sfx('check'); });
   $('#st-exp').addEventListener('click', () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([store.export()], { type: 'application/json' }));
@@ -825,7 +935,13 @@ routes.reglages = () => {
 
 // ---------------------------------------------------------------- démarrage
 store.load();
+configureSound(store.s.profile.sound || {});
 render();
 ensureAvatar();
+// écran de lancement : logo puis l'appli
+const splashStart = performance.now();
+Promise.race([avatarReady || Promise.resolve(), new Promise((r) => setTimeout(r, 2600))]).then(() => {
+  setTimeout(() => { const sp = document.getElementById('splash'); if (sp) { sp.classList.add('out'); setTimeout(() => sp.remove(), 500); } }, Math.max(0, 1500 - (performance.now() - splashStart)));
+});
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 document.addEventListener('visibilitychange', () => { if (avatar) avatar.paused = document.hidden; });

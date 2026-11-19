@@ -133,11 +133,12 @@ async function loadProxy(core, key) {
 }
 
 const texLoader = new THREE.TextureLoader();
+let MAX_ANISO = 4;
 function tex(core, path, srgb = true) {
   if (!core.tex[path]) {
     const t = texLoader.load(ASSETS + path.replace(/^tex\//, ''));
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    t.anisotropy = 4;
+    t.anisotropy = MAX_ANISO;
     core.tex[path] = t;
   }
   return core.tex[path];
@@ -224,6 +225,26 @@ function fitProxy(px, V, tuckAbove = null) {
   return out;
 }
 
+function skinVerts(sk, P, N, si, sw, outP, outN, used) {
+  const n = used ? used.length : P.length / 3;
+  for (let k = 0; k < n; k++) {
+    const v = used ? used[k] : k, o = v * 3, q = v * 4;
+    const x = P[o], y = P[o + 1], z = P[o + 2], nx = N[o], ny = N[o + 1], nz = N[o + 2];
+    let px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0;
+    for (let j = 0; j < 4; j++) {
+      const w = sw[q + j]; if (w === 0) continue;
+      const m = si[q + j] * 12;
+      px += w * (sk[m] * x + sk[m + 1] * y + sk[m + 2] * z + sk[m + 3]);
+      py += w * (sk[m + 4] * x + sk[m + 5] * y + sk[m + 6] * z + sk[m + 7]);
+      pz += w * (sk[m + 8] * x + sk[m + 9] * y + sk[m + 10] * z + sk[m + 11]);
+      qx += w * (sk[m] * nx + sk[m + 1] * ny + sk[m + 2] * nz);
+      qy += w * (sk[m + 4] * nx + sk[m + 5] * ny + sk[m + 6] * nz);
+      qz += w * (sk[m + 8] * nx + sk[m + 9] * ny + sk[m + 10] * nz);
+    }
+    outP[o] = px; outP[o + 1] = py; outP[o + 2] = pz; outN[o] = qx; outN[o + 1] = qy; outN[o + 2] = qz;
+  }
+}
+
 // --------------------------------------------------------------- poses
 // Rotations en degrés (x, y, z) appliquées aux os (repères alignés sur le monde au repos, pose en A).
 const P = (o) => o;
@@ -293,7 +314,8 @@ export class Avatar {
   async init() {
     const core = this.core = await loadCore();
     const r = this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: true, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2.5));
+    MAX_ANISO = Math.min(8, r.capabilities.getMaxAnisotropy ? r.capabilities.getMaxAnisotropy() : 4);
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.05;
@@ -323,7 +345,10 @@ export class Avatar {
     this.bones = core.meta.bones.map((b) => { const bone = new THREE.Bone(); bone.name = b.name; return bone; });
     core.meta.bones.forEach((b, i) => { if (b.parent >= 0) this.bones[b.parent].add(this.bones[i]); else this.root.add(this.bones[i]); });
     this.boneByName = Object.fromEntries(this.bones.map((b) => [b.name, b]));
-    this.skeleton = new THREE.Skeleton(this.bones);
+    this.parentIdx = core.meta.bones.map((b) => b.parent);
+    this.boneM = this.bones.map(() => new THREE.Matrix4());
+    this.restHead = this.bones.map(() => new THREE.Vector3());
+    this.sk = new Float32Array(this.bones.length * 12);
     this.restPos = this.bones.map(() => new THREE.Vector3());
     this.curQ = this.bones.map(() => new THREE.Quaternion());
     this.tmpQ = new THREE.Quaternion(); this.tmpE = new THREE.Euler();
@@ -337,11 +362,10 @@ export class Avatar {
     bg.setAttribute('uv', new THREE.BufferAttribute(core.bodyUV, 2));
     const si = new Uint16Array(nB * 4), sw = new Float32Array(nB * 4);
     for (let r2 = 0; r2 < nB; r2++) { const v = core.bodyMap[r2]; for (let j = 0; j < 4; j++) { si[r2 * 4 + j] = core.skinIndex[v * 4 + j]; sw[r2 * 4 + j] = core.skinWeight[v * 4 + j]; } }
-    bg.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
-    bg.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    this.bodySI = si; this.bodySW = sw;
     bg.setIndex(new THREE.BufferAttribute(new Uint16Array(core.bodyIndex), 1));
-    this.skinMat = new THREE.MeshPhysicalMaterial({ roughness: 0.62, metalness: 0, sheen: 0.35, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x8a3a2a), specularIntensity: 0.45 });
-    const body = this.body = new THREE.SkinnedMesh(bg, this.skinMat);
+    this.skinMat = new THREE.MeshPhysicalMaterial({ roughness: 0.56, metalness: 0, sheen: 0.4, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x9a4434), specularIntensity: 0.5, clearcoat: 0.08, clearcoatRoughness: 0.6 });
+    const body = this.body = new THREE.Mesh(bg, this.skinMat);
     body.frustumCulled = false;
     this.root.add(body);
 
@@ -404,14 +428,12 @@ export class Avatar {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     g.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     g.setAttribute('uv', new THREE.BufferAttribute(px.uv, 2));
-    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(px.skinIndex, 4));
-    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(px.skinWeight, 4));
+
     g.setIndex(new THREE.BufferAttribute(px.index, 1));
     const mat = new THREE.MeshStandardMaterial({ roughness: px.meta.mat.rough ?? 0.8 });
-    const mesh = new THREE.SkinnedMesh(g, mat);
+    const mesh = new THREE.Mesh(g, mat);
     mesh.frustumCulled = false;
     mesh.renderOrder = { eyes: 1, brows: 3, lashes: 4, hair: 6, top: 2, bottom: 2, socks: 1, shoes: 2, watch: 3 }[slot] || 2;
-    mesh.bind(this.skeleton);
     this.root.add(mesh);
     return mesh;
   }
@@ -422,8 +444,7 @@ export class Avatar {
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
     g.setAttribute('normal', bg.attributes.normal);
     g.setAttribute('uv', bg.attributes.uv);
-    g.setAttribute('skinIndex', bg.attributes.skinIndex);
-    g.setAttribute('skinWeight', bg.attributes.skinWeight);
+
     const tri = core.garments[key].tris, idx = new Uint16Array(tri.length * 3);
     for (let i = 0; i < tri.length; i++) { const t = tri[i] * 3; idx[i * 3] = core.bodyIndex[t]; idx[i * 3 + 1] = core.bodyIndex[t + 1]; idx[i * 3 + 2] = core.bodyIndex[t + 2]; }
     g.setIndex(new THREE.BufferAttribute(idx, 1));
@@ -436,9 +457,9 @@ export class Avatar {
       sh.fragmentShader = 'varying float vCov;\n' + sh.fragmentShader.replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\nif (vCov < 0.0) discard;');
     };
     mat.customProgramCacheKey = () => 'garment';
-    const mesh = new THREE.SkinnedMesh(g, mat);
+    const mesh = new THREE.Mesh(g, mat);
     mesh.frustumCulled = false; mesh.renderOrder = slot === 'top' ? 3 : 2;
-    mesh.bind(this.skeleton);
+    mesh.userData.used = Uint32Array.from(new Set(idx));
     this.root.add(mesh);
     return mesh;
   }
@@ -602,7 +623,8 @@ export class Avatar {
       core.meta.bones.forEach((b, i) => {
         if (!b.name.startsWith('finger') || !b.name.endsWith(side)) return;
         const dir = new THREE.Vector3().subVectors(tails[i], heads[i]).normalize();
-        this.boneAxis[b.name] = new THREE.Vector3().crossVectors(dir, palm).normalize();
+        const ax = new THREE.Vector3().crossVectors(dir, palm);
+        this.boneAxis[b.name] = ax.lengthSq() > 1e-8 ? ax.normalize() : new THREE.Vector3(1, 0, 0);
       });
       for (const n of ['lowerarm02.', 'upperarm02.']) {
         const i = bi(n + side); this.boneAxis[n + side] = new THREE.Vector3().subVectors(tails[i], heads[i]).normalize();
@@ -614,11 +636,15 @@ export class Avatar {
       this.restPos[i].copy(bone.position);
       bone.quaternion.identity();
     });
-    this.root.updateMatrixWorld(true);
-    this.skeleton.calculateInverses();
-    this.skeleton.pose();
-    this.body.bind(this.skeleton, new THREE.Matrix4());
-    for (const m of Object.values(this.meshes)) m.mesh.bind(this.skeleton, new THREE.Matrix4());
+    heads.forEach((h, i) => this.restHead[i].copy(h));
+    // pose de repos mémorisée : la déformation est calculée en JavaScript (identique sur tous les appareils)
+    this.bodyRestP = bg.attributes.position.array.slice();
+    this.bodyRestN = bg.attributes.normal.array.slice();
+    for (const m of Object.values(this.meshes)) {
+      const g = m.mesh.geometry;
+      m.restP = g.attributes.position.array.slice();
+      m.restN = g.attributes.normal.array.slice();
+    }
     this.headY = heads[core.meta.bones.findIndex((b) => b.name === 'head')].y;
     this._frame();
   }
@@ -654,7 +680,7 @@ export class Avatar {
     const now = performance.now();
     const t = now / 1000;
     if (this.pose !== 'idle' && now > this.poseUntil) this.pose = 'idle';
-    const dt = Math.min(0.05, this.clock.getDelta() || 0.016);
+    const dt = Math.min(0.12, this.clock.getDelta() || 0.016);
     const k = 1 - Math.exp(-dt * 7);
     const { tg, fist, drop } = this._poseTargets(t);
     this.fist += (fist - this.fist) * k;
@@ -673,7 +699,7 @@ export class Avatar {
       if (ax !== undefined && this.boneAxis && this.boneAxis[bone.name]) this.tmpQ.setFromAxisAngle(this.boneAxis[bone.name], ax * DEG);
       else if (r) { this.tmpE.set(r[0] * DEG, r[1] * DEG, r[2] * DEG, 'XYZ'); this.tmpQ.setFromEuler(this.tmpE); }
       else this.tmpQ.identity();
-      this.curQ[i].slerp(this.tmpQ, k);
+      this.curQ[i].slerp(this.tmpQ, k).normalize();
       bone.quaternion.copy(this.curQ[i]);
       bone.position.copy(this.restPos[i]);
     });
@@ -699,16 +725,41 @@ export class Avatar {
     const rootBone = this.bones[0];
     rootBone.position.y += jy - this.drop * 0.22 * this.modelHeight + Math.sin(t * 1.6) * 0.002 * this.modelHeight;
     rootBone.position.x += Math.sin(t * 0.55) * 0.006 * this.modelHeight;
+    this._skin();
     // rotation (glisser)
     if (!this.dragging) { this.yaw += this.yawVel; this.yawVel *= 0.92; if (this.opts.autoRotate) this.yaw += dt * 0.25; }
     this.root.rotation.y = this.yaw;
     this.renderer.render(this.scene, this.camera);
   }
 
+  _skin() {
+    if (!this.bodyRestP) return;
+    const B = this.bones, sk = this.sk, h = this.restHead;
+    for (let i = 0; i < B.length; i++) {
+      const b = B[i]; b.updateMatrix();
+      const p = this.parentIdx[i];
+      if (p < 0) this.boneM[i].copy(b.matrix); else this.boneM[i].multiplyMatrices(this.boneM[p], b.matrix);
+      const e = this.boneM[i].elements, hx = h[i].x, hy = h[i].y, hz = h[i].z, o = i * 12;
+      sk[o] = e[0]; sk[o + 1] = e[4]; sk[o + 2] = e[8]; sk[o + 3] = e[12] - (e[0] * hx + e[4] * hy + e[8] * hz);
+      sk[o + 4] = e[1]; sk[o + 5] = e[5]; sk[o + 6] = e[9]; sk[o + 7] = e[13] - (e[1] * hx + e[5] * hy + e[9] * hz);
+      sk[o + 8] = e[2]; sk[o + 9] = e[6]; sk[o + 10] = e[10]; sk[o + 11] = e[14] - (e[2] * hx + e[6] * hy + e[10] * hz);
+    }
+    const g = this.body.geometry;
+    skinVerts(sk, this.bodyRestP, this.bodyRestN, this.bodySI, this.bodySW, g.attributes.position.array, g.attributes.normal.array, null);
+    g.attributes.position.needsUpdate = true; g.attributes.normal.needsUpdate = true;
+    for (const m of Object.values(this.meshes)) {
+      if (!m.restP) continue;
+      const mg = m.mesh.geometry;
+      if (m.garment) skinVerts(sk, m.restP, m.restN, this.bodySI, this.bodySW, mg.attributes.position.array, mg.attributes.normal.array, m.mesh.userData.used);
+      else skinVerts(sk, m.restP, m.restN, m.px.skinIndex, m.px.skinWeight, mg.attributes.position.array, mg.attributes.normal.array, null);
+      mg.attributes.position.needsUpdate = true; mg.attributes.normal.needsUpdate = true;
+    }
+  }
+
   _loop() {
     if (this.disposed) return;
     this._raf = requestAnimationFrame(() => this._loop());
-    if (this.paused || this.visible === false) return;
+    if (this.paused || this.visible === false || !this.canvas.isConnected) return;
     this._frame();
   }
 
